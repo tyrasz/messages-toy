@@ -1,0 +1,181 @@
+import 'package:dio/dio.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../models/user.dart';
+import '../models/contact.dart';
+import '../models/message.dart';
+import '../models/conversation.dart';
+
+class ApiService {
+  static const String baseUrl = 'http://localhost:8080/api';
+
+  final Dio _dio;
+  final FlutterSecureStorage _storage;
+
+  String? _accessToken;
+  String? _refreshToken;
+  User? _currentUser;
+
+  ApiService()
+      : _dio = Dio(BaseOptions(
+          baseUrl: baseUrl,
+          connectTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 10),
+        )),
+        _storage = const FlutterSecureStorage() {
+    _dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) async {
+        if (_accessToken != null) {
+          options.headers['Authorization'] = 'Bearer $_accessToken';
+        }
+        return handler.next(options);
+      },
+      onError: (error, handler) async {
+        if (error.response?.statusCode == 401 && _refreshToken != null) {
+          // Try to refresh token
+          try {
+            await _refreshAccessToken();
+            // Retry the request
+            final opts = error.requestOptions;
+            opts.headers['Authorization'] = 'Bearer $_accessToken';
+            final response = await _dio.fetch(opts);
+            return handler.resolve(response);
+          } catch (e) {
+            // Refresh failed, logout
+            await logout();
+          }
+        }
+        return handler.next(error);
+      },
+    ));
+  }
+
+  Future<void> init() async {
+    _accessToken = await _storage.read(key: 'access_token');
+    _refreshToken = await _storage.read(key: 'refresh_token');
+    final userJson = await _storage.read(key: 'user');
+    if (userJson != null) {
+      // Parse user from stored JSON
+    }
+  }
+
+  bool get isAuthenticated => _accessToken != null;
+  User? get currentUser => _currentUser;
+  String? get accessToken => _accessToken;
+
+  Future<void> _refreshAccessToken() async {
+    final response = await _dio.post('/auth/refresh', data: {
+      'refresh_token': _refreshToken,
+    });
+
+    _accessToken = response.data['access_token'];
+    _refreshToken = response.data['refresh_token'];
+
+    await _storage.write(key: 'access_token', value: _accessToken);
+    await _storage.write(key: 'refresh_token', value: _refreshToken);
+  }
+
+  // Auth endpoints
+
+  Future<User> register({
+    required String username,
+    required String password,
+    String? phone,
+    String? displayName,
+  }) async {
+    final response = await _dio.post('/auth/register', data: {
+      'username': username,
+      'password': password,
+      if (phone != null) 'phone': phone,
+      if (displayName != null) 'display_name': displayName,
+    });
+
+    await _handleAuthResponse(response.data);
+    return _currentUser!;
+  }
+
+  Future<User> login({
+    required String username,
+    required String password,
+  }) async {
+    final response = await _dio.post('/auth/login', data: {
+      'username': username,
+      'password': password,
+    });
+
+    await _handleAuthResponse(response.data);
+    return _currentUser!;
+  }
+
+  Future<void> _handleAuthResponse(Map<String, dynamic> data) async {
+    _accessToken = data['access_token'];
+    _refreshToken = data['refresh_token'];
+    _currentUser = User.fromJson(data['user']);
+
+    await _storage.write(key: 'access_token', value: _accessToken);
+    await _storage.write(key: 'refresh_token', value: _refreshToken);
+  }
+
+  Future<void> logout() async {
+    _accessToken = null;
+    _refreshToken = null;
+    _currentUser = null;
+    await _storage.deleteAll();
+  }
+
+  // Contacts endpoints
+
+  Future<List<Contact>> getContacts() async {
+    final response = await _dio.get('/contacts');
+    final contacts = (response.data['contacts'] as List)
+        .map((json) => Contact.fromJson(json))
+        .toList();
+    return contacts;
+  }
+
+  Future<Contact> addContact({
+    required String username,
+    String? nickname,
+  }) async {
+    final response = await _dio.post('/contacts', data: {
+      'username': username,
+      if (nickname != null) 'nickname': nickname,
+    });
+    return Contact.fromJson(response.data);
+  }
+
+  Future<void> removeContact(String contactId) async {
+    await _dio.delete('/contacts/$contactId');
+  }
+
+  // Messages endpoints
+
+  Future<List<Conversation>> getConversations() async {
+    final response = await _dio.get('/messages/conversations');
+    final conversations = (response.data['conversations'] as List)
+        .map((json) => Conversation.fromJson(json))
+        .toList();
+    return conversations;
+  }
+
+  Future<List<Message>> getMessages(String userId, {int limit = 50, int offset = 0}) async {
+    final response = await _dio.get('/messages/$userId', queryParameters: {
+      'limit': limit,
+      'offset': offset,
+    });
+    final messages = (response.data['messages'] as List)
+        .map((json) => Message.fromJson(json))
+        .toList();
+    return messages;
+  }
+
+  // Media endpoints
+
+  Future<Map<String, dynamic>> uploadMedia(String filePath) async {
+    final formData = FormData.fromMap({
+      'file': await MultipartFile.fromFile(filePath),
+    });
+
+    final response = await _dio.post('/media/upload', data: formData);
+    return response.data;
+  }
+}
