@@ -10,6 +10,7 @@ import '../models/link_preview.dart';
 import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/blocks_provider.dart';
+import '../providers/starred_provider.dart';
 import '../widgets/media_bubbles.dart';
 import '../widgets/link_preview_widget.dart';
 import 'forward_message_screen.dart';
@@ -670,6 +671,20 @@ class _SwipeableMessageBubble extends ConsumerWidget {
                 );
               },
             ),
+            Builder(builder: (context) {
+              final isStarred = ref.watch(starredProvider).isStarred(message.id);
+              return ListTile(
+                leading: Icon(
+                  isStarred ? Icons.star : Icons.star_outline,
+                  color: isStarred ? Colors.amber : null,
+                ),
+                title: Text(isStarred ? 'Unstar' : 'Star'),
+                onTap: () {
+                  Navigator.pop(context);
+                  ref.read(starredProvider.notifier).toggleStar(message.id);
+                },
+              );
+            }),
             if (isMe && message.content != null) ...[
               ListTile(
                 leading: const Icon(Icons.edit),
@@ -878,6 +893,15 @@ class _MessageBubble extends ConsumerWidget {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Star indicator
+                if (ref.watch(starredProvider).isStarred(message.id)) ...[
+                  Icon(
+                    Icons.star,
+                    size: 12,
+                    color: isMe ? Colors.amber[200] : Colors.amber,
+                  ),
+                  const SizedBox(width: 4),
+                ],
                 Text(
                   _formatTime(message.createdAt),
                   style: TextStyle(

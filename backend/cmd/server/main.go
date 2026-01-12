@@ -31,6 +31,7 @@ func main() {
 		&models.DeviceToken{},
 		&models.Reaction{},
 		&models.LinkPreview{},
+		&models.StarredMessage{},
 	)
 
 	// Create WebSocket hub

@@ -81,6 +81,14 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	links.Post("/preview", linkPreviewHandler.FetchPreview)
 	links.Get("/preview", linkPreviewHandler.GetPreview)
 
+	// Starred messages
+	starredHandler := handlers.NewStarredHandler()
+	starred := protected.Group("/starred")
+	starred.Get("/", starredHandler.List)
+	starred.Post("/:messageId", starredHandler.Star)
+	starred.Delete("/:messageId", starredHandler.Unstar)
+	starred.Get("/:messageId", starredHandler.IsStarred)
+
 	// Admin routes (for moderation review)
 	adminHandler := handlers.NewAdminHandler()
 	admin := protected.Group("/admin")

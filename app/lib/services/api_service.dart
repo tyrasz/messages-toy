@@ -8,6 +8,7 @@ import '../models/group.dart';
 import '../models/block.dart';
 import '../models/search_result.dart';
 import '../models/link_preview.dart';
+import '../models/starred_message.dart';
 
 class ApiService {
   static const String baseUrl = 'http://localhost:8080/api';
@@ -283,5 +284,33 @@ class ApiService {
     } catch (e) {
       return null;
     }
+  }
+
+  // Starred messages
+  Future<List<StarredMessage>> getStarredMessages({int limit = 50, int offset = 0}) async {
+    final response = await _dio.get('/starred', queryParameters: {
+      'limit': limit,
+      'offset': offset,
+    });
+    final starred = (response.data['starred'] as List?)
+            ?.map((json) => StarredMessage.fromJson(json as Map<String, dynamic>))
+            .toList() ??
+        [];
+    return starred;
+  }
+
+  Future<bool> starMessage(String messageId) async {
+    final response = await _dio.post('/starred/$messageId');
+    return response.data['starred'] as bool;
+  }
+
+  Future<bool> unstarMessage(String messageId) async {
+    await _dio.delete('/starred/$messageId');
+    return false;
+  }
+
+  Future<bool> isMessageStarred(String messageId) async {
+    final response = await _dio.get('/starred/$messageId');
+    return response.data['starred'] as bool;
   }
 }

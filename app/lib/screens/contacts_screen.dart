@@ -10,6 +10,7 @@ import 'chat_screen.dart';
 import 'group_chat_screen.dart';
 import 'create_group_screen.dart';
 import 'search_screen.dart';
+import 'starred_messages_screen.dart';
 
 class ContactsScreen extends ConsumerStatefulWidget {
   const ContactsScreen({super.key});
@@ -123,6 +124,23 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen>
           ),
           PopupMenuButton(
             itemBuilder: (context) => [
+              PopupMenuItem(
+                child: const Row(
+                  children: [
+                    Icon(Icons.star, color: Colors.amber),
+                    SizedBox(width: 12),
+                    Text('Starred Messages'),
+                  ],
+                ),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const StarredMessagesScreen(),
+                    ),
+                  );
+                },
+              ),
               PopupMenuItem(
                 child: const Text('Settings'),
                 onTap: () {
