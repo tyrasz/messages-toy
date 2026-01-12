@@ -316,6 +316,86 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
+  void _showDisappearingSettings() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  const Icon(Icons.timer),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Disappearing messages',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              title: const Text('Off'),
+              onTap: () => _setDisappearingTimer(0),
+            ),
+            ListTile(
+              title: const Text('24 hours'),
+              onTap: () => _setDisappearingTimer(86400),
+            ),
+            ListTile(
+              title: const Text('7 days'),
+              onTap: () => _setDisappearingTimer(604800),
+            ),
+            ListTile(
+              title: const Text('90 days'),
+              onTap: () => _setDisappearingTimer(7776000),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _setDisappearingTimer(int seconds) async {
+    Navigator.pop(context);
+    try {
+      final apiService = ref.read(apiServiceProvider);
+      await apiService.setDisappearingTimer(
+        otherUserId: widget.user.id,
+        seconds: seconds,
+      );
+
+      String message;
+      if (seconds == 0) {
+        message = 'Disappearing messages turned off';
+      } else if (seconds == 86400) {
+        message = 'Messages will disappear after 24 hours';
+      } else if (seconds == 604800) {
+        message = 'Messages will disappear after 7 days';
+      } else {
+        message = 'Messages will disappear after 90 days';
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to update settings')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final chatState = ref.watch(chatProvider);
@@ -367,9 +447,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             onSelected: (value) {
               if (value == 'block') {
                 _handleBlockUser();
+              } else if (value == 'disappearing') {
+                _showDisappearingSettings();
               }
             },
             itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'disappearing',
+                child: Row(
+                  children: [
+                    Icon(Icons.timer),
+                    SizedBox(width: 8),
+                    Text('Disappearing messages'),
+                  ],
+                ),
+              ),
               PopupMenuItem(
                 value: 'block',
                 child: Row(
@@ -893,6 +985,15 @@ class _MessageBubble extends ConsumerWidget {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Disappearing indicator
+                if (message.isDisappearing) ...[
+                  Icon(
+                    Icons.timer,
+                    size: 12,
+                    color: isMe ? Colors.white60 : Colors.grey[500],
+                  ),
+                  const SizedBox(width: 4),
+                ],
                 // Star indicator
                 if (ref.watch(starredProvider).isStarred(message.id)) ...[
                   Icon(

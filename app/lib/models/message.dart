@@ -54,6 +54,7 @@ class Message {
   final bool isDeleted;      // Whether message is deleted for everyone
   final List<ReactionInfo> reactions; // Reactions on this message
   final String? forwardedFrom; // Original sender name if forwarded
+  final DateTime? expiresAt;   // For disappearing messages
   final DateTime createdAt;
 
   Message({
@@ -78,10 +79,13 @@ class Message {
     this.isDeleted = false,
     this.reactions = const [],
     this.forwardedFrom,
+    this.expiresAt,
     required this.createdAt,
   });
 
   bool get isEdited => editedAt != null;
+  bool get isDisappearing => expiresAt != null;
+  bool get isExpired => expiresAt != null && expiresAt!.isBefore(DateTime.now());
   bool get hasMedia => mediaId != null;
   bool get isImageMessage => mediaType == MediaType.image;
   bool get isVideoMessage => mediaType == MediaType.video;
@@ -122,6 +126,9 @@ class Message {
               .toList() ??
           [],
       forwardedFrom: json['forwarded_from'] as String?,
+      expiresAt: json['expires_at'] != null
+          ? DateTime.parse(json['expires_at'] as String)
+          : null,
       createdAt: json['created_at'] != null
           ? DateTime.parse(json['created_at'] as String)
           : DateTime.now(),
@@ -195,6 +202,7 @@ class Message {
     bool? isDeleted,
     List<ReactionInfo>? reactions,
     String? forwardedFrom,
+    DateTime? expiresAt,
     DateTime? createdAt,
   }) {
     return Message(
@@ -219,6 +227,7 @@ class Message {
       isDeleted: isDeleted ?? this.isDeleted,
       reactions: reactions ?? this.reactions,
       forwardedFrom: forwardedFrom ?? this.forwardedFrom,
+      expiresAt: expiresAt ?? this.expiresAt,
       createdAt: createdAt ?? this.createdAt,
     );
   }

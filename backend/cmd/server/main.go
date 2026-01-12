@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -13,6 +14,7 @@ import (
 	"messenger/internal/api"
 	"messenger/internal/database"
 	"messenger/internal/models"
+	"messenger/internal/services"
 	"messenger/internal/websocket"
 )
 
@@ -32,11 +34,16 @@ func main() {
 		&models.Reaction{},
 		&models.LinkPreview{},
 		&models.StarredMessage{},
+		&models.ConversationSettings{},
 	)
 
 	// Create WebSocket hub
 	hub := websocket.NewHub()
 	go hub.Run()
+
+	// Start message cleanup service (for disappearing messages)
+	cleanupService := services.NewMessageCleanupService(database.DB, 1*time.Minute)
+	cleanupService.Start()
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{

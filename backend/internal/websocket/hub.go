@@ -187,6 +187,7 @@ type ChatMessage struct {
 	ReplyToID      *string       `json:"reply_to_id,omitempty"`     // ID of message being replied to
 	ReplyTo        *ReplyPreview `json:"reply_to,omitempty"`        // Preview of replied message
 	ForwardedFrom  *string       `json:"forwarded_from,omitempty"`  // Original sender name for forwarded messages
+	ExpiresAt      *string       `json:"expires_at,omitempty"`      // For disappearing messages
 	CreatedAt      string        `json:"created_at,omitempty"`
 }
 

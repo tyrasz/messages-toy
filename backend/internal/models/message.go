@@ -27,6 +27,7 @@ type Message struct {
 	Status        MessageStatus `gorm:"default:sent" json:"status"`
 	EditedAt      *time.Time    `json:"edited_at,omitempty"`                 // When message was edited
 	DeletedAt     *time.Time    `json:"deleted_at,omitempty"`                // Soft delete for "delete for everyone"
+	ExpiresAt     *time.Time    `gorm:"index" json:"expires_at,omitempty"`   // For disappearing messages
 	CreatedAt     time.Time     `json:"created_at"`
 	UpdatedAt     time.Time     `json:"updated_at"`
 
@@ -65,6 +66,17 @@ func (m *Message) IsDeleted() bool {
 
 func (m *Message) IsEdited() bool {
 	return m.EditedAt != nil
+}
+
+func (m *Message) IsExpired() bool {
+	if m.ExpiresAt == nil {
+		return false
+	}
+	return m.ExpiresAt.Before(time.Now())
+}
+
+func (m *Message) IsDisappearing() bool {
+	return m.ExpiresAt != nil
 }
 
 func (m *Message) BeforeCreate(tx *gorm.DB) error {

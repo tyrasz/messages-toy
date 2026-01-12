@@ -89,6 +89,13 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	starred.Delete("/:messageId", starredHandler.Unstar)
 	starred.Get("/:messageId", starredHandler.IsStarred)
 
+	// Conversation settings (disappearing messages, mute)
+	settingsHandler := handlers.NewSettingsHandler()
+	settings := protected.Group("/settings")
+	settings.Get("/conversation", settingsHandler.GetConversationSettings)
+	settings.Post("/disappearing", settingsHandler.SetDisappearingMessages)
+	settings.Post("/mute", settingsHandler.MuteConversation)
+
 	// Admin routes (for moderation review)
 	adminHandler := handlers.NewAdminHandler()
 	admin := protected.Group("/admin")

@@ -164,6 +164,14 @@ func (c *Client) handleDirectMessage(msg ChatMessage) {
 		return
 	}
 
+	// Check for disappearing messages setting
+	var expiresAt *time.Time
+	disappearingSeconds := models.GetDisappearingTimer(database.DB, c.UserID, &msg.To, nil)
+	if disappearingSeconds > 0 {
+		t := time.Now().Add(time.Duration(disappearingSeconds) * time.Second)
+		expiresAt = &t
+	}
+
 	// Save message to database
 	message := models.Message{
 		SenderID:      c.UserID,
@@ -172,6 +180,7 @@ func (c *Client) handleDirectMessage(msg ChatMessage) {
 		MediaID:       msg.MediaID,
 		ReplyToID:     msg.ReplyToID,
 		ForwardedFrom: msg.ForwardedFrom,
+		ExpiresAt:     expiresAt,
 		Status:        models.MessageStatusSent,
 	}
 
@@ -181,6 +190,13 @@ func (c *Client) handleDirectMessage(msg ChatMessage) {
 	}
 
 	// Prepare outgoing message
+	// Format expires_at if set
+	var expiresAtStr *string
+	if message.ExpiresAt != nil {
+		s := message.ExpiresAt.Format(time.RFC3339)
+		expiresAtStr = &s
+	}
+
 	outMsg := ChatMessage{
 		Type:          "message",
 		ID:            message.ID,
@@ -190,6 +206,7 @@ func (c *Client) handleDirectMessage(msg ChatMessage) {
 		MediaID:       msg.MediaID,
 		ReplyToID:     msg.ReplyToID,
 		ForwardedFrom: msg.ForwardedFrom,
+		ExpiresAt:     expiresAtStr,
 		CreatedAt:     message.CreatedAt.Format(time.RFC3339),
 	}
 
@@ -250,6 +267,14 @@ func (c *Client) handleGroupMessage(msg ChatMessage) {
 		return
 	}
 
+	// Check for disappearing messages setting
+	var expiresAt *time.Time
+	disappearingSeconds := models.GetDisappearingTimer(database.DB, c.UserID, nil, &msg.GroupID)
+	if disappearingSeconds > 0 {
+		t := time.Now().Add(time.Duration(disappearingSeconds) * time.Second)
+		expiresAt = &t
+	}
+
 	// Save message to database
 	message := models.Message{
 		SenderID:      c.UserID,
@@ -258,12 +283,20 @@ func (c *Client) handleGroupMessage(msg ChatMessage) {
 		MediaID:       msg.MediaID,
 		ReplyToID:     msg.ReplyToID,
 		ForwardedFrom: msg.ForwardedFrom,
+		ExpiresAt:     expiresAt,
 		Status:        models.MessageStatusSent,
 	}
 
 	if err := database.DB.Create(&message).Error; err != nil {
 		c.sendError("Failed to save message")
 		return
+	}
+
+	// Format expires_at if set
+	var expiresAtStr *string
+	if message.ExpiresAt != nil {
+		s := message.ExpiresAt.Format(time.RFC3339)
+		expiresAtStr = &s
 	}
 
 	// Prepare outgoing message
@@ -276,6 +309,7 @@ func (c *Client) handleGroupMessage(msg ChatMessage) {
 		MediaID:       msg.MediaID,
 		ReplyToID:     msg.ReplyToID,
 		ForwardedFrom: msg.ForwardedFrom,
+		ExpiresAt:     expiresAtStr,
 		CreatedAt:     message.CreatedAt.Format(time.RFC3339),
 	}
 

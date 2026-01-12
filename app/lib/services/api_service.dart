@@ -313,4 +313,39 @@ class ApiService {
     final response = await _dio.get('/starred/$messageId');
     return response.data['starred'] as bool;
   }
+
+  // Conversation settings (disappearing messages)
+  Future<int> getDisappearingTimer({String? otherUserId, String? groupId}) async {
+    final params = <String, dynamic>{};
+    if (otherUserId != null) params['other_user_id'] = otherUserId;
+    if (groupId != null) params['group_id'] = groupId;
+
+    final response = await _dio.get('/settings/conversation', queryParameters: params);
+    final settings = response.data['settings'] as Map<String, dynamic>?;
+    return settings?['disappearing_seconds'] as int? ?? 0;
+  }
+
+  Future<void> setDisappearingTimer({
+    String? otherUserId,
+    String? groupId,
+    required int seconds,
+  }) async {
+    await _dio.post('/settings/disappearing', data: {
+      if (otherUserId != null) 'other_user_id': otherUserId,
+      if (groupId != null) 'group_id': groupId,
+      'seconds': seconds,
+    });
+  }
+
+  Future<void> muteConversation({
+    String? otherUserId,
+    String? groupId,
+    required int hours,
+  }) async {
+    await _dio.post('/settings/mute', data: {
+      if (otherUserId != null) 'other_user_id': otherUserId,
+      if (groupId != null) 'group_id': groupId,
+      'hours': hours,
+    });
+  }
 }
