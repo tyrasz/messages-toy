@@ -22,6 +22,7 @@ class WebSocketService {
   final _statusController = StreamController<ConnectionStatus>.broadcast();
   final _messageEditedController = StreamController<Map<String, dynamic>>.broadcast();
   final _messageDeletedController = StreamController<Map<String, dynamic>>.broadcast();
+  final _reactionController = StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<Message> get messageStream => _messageController.stream;
   Stream<Map<String, dynamic>> get typingStream => _typingController.stream;
@@ -30,6 +31,7 @@ class WebSocketService {
   Stream<ConnectionStatus> get statusStream => _statusController.stream;
   Stream<Map<String, dynamic>> get messageEditedStream => _messageEditedController.stream;
   Stream<Map<String, dynamic>> get messageDeletedStream => _messageDeletedController.stream;
+  Stream<Map<String, dynamic>> get reactionStream => _reactionController.stream;
 
   ConnectionStatus get status => _status;
   bool get isConnected => _status == ConnectionStatus.connected;
@@ -89,6 +91,9 @@ class WebSocketService {
           break;
         case 'message_deleted':
           _messageDeletedController.add(json);
+          break;
+        case 'reaction':
+          _reactionController.add(json);
           break;
         case 'error':
           print('Server error: ${json['error']}');
@@ -209,6 +214,31 @@ class WebSocketService {
     _channel?.sink.add(jsonEncode(message));
   }
 
+  void sendReaction({required String messageId, required String emoji}) {
+    if (!isConnected) return;
+
+    final message = {
+      'type': 'reaction',
+      'message_id': messageId,
+      'emoji': emoji,
+      'action': 'add',
+    };
+
+    _channel?.sink.add(jsonEncode(message));
+  }
+
+  void removeReaction({required String messageId}) {
+    if (!isConnected) return;
+
+    final message = {
+      'type': 'reaction',
+      'message_id': messageId,
+      'action': 'remove',
+    };
+
+    _channel?.sink.add(jsonEncode(message));
+  }
+
   void disconnect() {
     _reconnectTimer?.cancel();
     _stopPingTimer();
@@ -227,5 +257,6 @@ class WebSocketService {
     _statusController.close();
     _messageEditedController.close();
     _messageDeletedController.close();
+    _reactionController.close();
   }
 }

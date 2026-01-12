@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import '../models/user.dart';
 import '../models/message.dart';
+import '../models/reaction.dart';
 import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/blocks_provider.dart';
@@ -615,6 +616,30 @@ class _SwipeableMessageBubble extends ConsumerWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Quick reaction row
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: QuickReactions.defaults.map((emoji) {
+                  return GestureDetector(
+                    onTap: () {
+                      Navigator.pop(context);
+                      ref.read(chatProvider.notifier).addReaction(message.id, emoji);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(emoji, style: const TextStyle(fontSize: 24)),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.reply),
               title: const Text('Reply'),
@@ -690,7 +715,7 @@ class _SwipeableMessageBubble extends ConsumerWidget {
   }
 }
 
-class _MessageBubble extends StatelessWidget {
+class _MessageBubble extends ConsumerWidget {
   final Message message;
   final bool isMe;
   final String? currentUserId;
@@ -702,27 +727,33 @@ class _MessageBubble extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        decoration: BoxDecoration(
-          color: isMe
-              ? Theme.of(context).primaryColor
-              : Colors.grey[200],
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: Radius.circular(isMe ? 16 : 4),
-            bottomRight: Radius.circular(isMe ? 4 : 16),
-          ),
-        ),
-        child: Column(
+      child: Column(
+        crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          Container(
+            margin: EdgeInsets.only(
+              top: 4,
+              bottom: message.hasReactions ? 0 : 4,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.75,
+            ),
+            decoration: BoxDecoration(
+              color: isMe
+                  ? Theme.of(context).primaryColor
+                  : Colors.grey[200],
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(16),
+                topRight: const Radius.circular(16),
+                bottomLeft: Radius.circular(isMe ? 16 : 4),
+                bottomRight: Radius.circular(isMe ? 4 : 16),
+              ),
+            ),
+            child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Reply preview
@@ -827,6 +858,69 @@ class _MessageBubble extends StatelessWidget {
               ],
             ),
           ],
+            ),
+          ),
+          // Reactions display
+          if (message.hasReactions)
+            _buildReactions(context, ref),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReactions(BuildContext context, WidgetRef ref) {
+    return Transform.translate(
+      offset: const Offset(0, -8),
+      child: Container(
+        margin: EdgeInsets.only(
+          left: isMe ? 0 : 8,
+          right: isMe ? 8 : 0,
+          bottom: 4,
+        ),
+        child: Wrap(
+          spacing: 4,
+          children: message.reactions.map((reaction) {
+            final hasMyReaction = reaction.hasUserReacted(currentUserId ?? '');
+            return GestureDetector(
+              onTap: () {
+                if (hasMyReaction) {
+                  ref.read(chatProvider.notifier).removeReaction(message.id);
+                } else {
+                  ref.read(chatProvider.notifier).addReaction(message.id, reaction.emoji);
+                }
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: hasMyReaction
+                      ? Theme.of(context).primaryColor.withOpacity(0.2)
+                      : Colors.grey[200],
+                  borderRadius: BorderRadius.circular(12),
+                  border: hasMyReaction
+                      ? Border.all(color: Theme.of(context).primaryColor, width: 1)
+                      : null,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(reaction.emoji, style: const TextStyle(fontSize: 14)),
+                    if (reaction.count > 1) ...[
+                      const SizedBox(width: 2),
+                      Text(
+                        '${reaction.count}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: hasMyReaction
+                              ? Theme.of(context).primaryColor
+                              : Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
         ),
       ),
     );

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import '../models/message.dart';
 import '../models/conversation.dart';
+import '../models/reaction.dart';
 import '../services/api_service.dart';
 import '../services/websocket_service.dart';
 import 'auth_provider.dart';
@@ -50,6 +51,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
   StreamSubscription? _ackSubscription;
   StreamSubscription? _messageEditedSubscription;
   StreamSubscription? _messageDeletedSubscription;
+  StreamSubscription? _reactionSubscription;
 
   ChatNotifier(
     this._apiService,
@@ -65,6 +67,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
     _ackSubscription = _webSocketService.ackStream.listen(_handleAck);
     _messageEditedSubscription = _webSocketService.messageEditedStream.listen(_handleMessageEdited);
     _messageDeletedSubscription = _webSocketService.messageDeletedStream.listen(_handleMessageDeleted);
+    _reactionSubscription = _webSocketService.reactionStream.listen(_handleReaction);
   }
 
   void _handleIncomingMessage(Message message) {
@@ -169,6 +172,30 @@ class ChatNotifier extends StateNotifier<ChatState> {
     }
   }
 
+  void _handleReaction(Map<String, dynamic> data) {
+    final messageId = data['message_id'] as String?;
+    final reactionsData = data['reactions'] as List<dynamic>?;
+
+    if (messageId != null && reactionsData != null) {
+      final reactions = reactionsData
+          .map((r) => ReactionInfo.fromJson(r as Map<String, dynamic>))
+          .toList();
+
+      final newMessages = <String, List<Message>>{};
+
+      for (final entry in state.messages.entries) {
+        newMessages[entry.key] = entry.value.map((msg) {
+          if (msg.id == messageId) {
+            return msg.copyWith(reactions: reactions);
+          }
+          return msg;
+        }).toList();
+      }
+
+      state = state.copyWith(messages: newMessages);
+    }
+  }
+
   Future<void> loadConversations() async {
     state = state.copyWith(isLoading: true, error: null);
 
@@ -261,6 +288,14 @@ class ChatNotifier extends StateNotifier<ChatState> {
     );
   }
 
+  void addReaction(String messageId, String emoji) {
+    _webSocketService.sendReaction(messageId: messageId, emoji: emoji);
+  }
+
+  void removeReaction(String messageId) {
+    _webSocketService.removeReaction(messageId: messageId);
+  }
+
   @override
   void dispose() {
     _messageSubscription?.cancel();
@@ -268,6 +303,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
     _ackSubscription?.cancel();
     _messageEditedSubscription?.cancel();
     _messageDeletedSubscription?.cancel();
+    _reactionSubscription?.cancel();
     super.dispose();
   }
 }

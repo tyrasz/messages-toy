@@ -245,3 +245,26 @@ type MessageDeletedEvent struct {
 	Type      string `json:"type"`
 	MessageID string `json:"message_id"`
 }
+
+// Reaction types
+type ReactionMessage struct {
+	Type      string `json:"type"`
+	MessageID string `json:"message_id"`
+	Emoji     string `json:"emoji,omitempty"` // Empty for remove
+	Action    string `json:"action"`          // "add" or "remove"
+}
+
+type ReactionEvent struct {
+	Type      string          `json:"type"`
+	MessageID string          `json:"message_id"`
+	UserID    string          `json:"user_id"`
+	Emoji     string          `json:"emoji,omitempty"`
+	Action    string          `json:"action"` // "added" or "removed"
+	Reactions []ReactionInfo  `json:"reactions,omitempty"`
+}
+
+type ReactionInfo struct {
+	Emoji string   `json:"emoji"`
+	Count int      `json:"count"`
+	Users []string `json:"users"`
+}

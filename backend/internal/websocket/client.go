@@ -109,6 +109,8 @@ func (c *Client) handleMessage(data []byte) {
 		c.handleMessageEdit(data)
 	case "message_delete":
 		c.handleMessageDelete(data)
+	case "reaction":
+		c.handleReaction(data)
 	default:
 		c.sendError("Unknown message type")
 	}
@@ -505,6 +507,107 @@ func (c *Client) handleMessageDelete(data []byte) {
 		c.Hub.SendToGroup(*message.GroupID, c.UserID, eventBytes)
 	} else if message.RecipientID != nil {
 		c.Hub.SendToUser(*message.RecipientID, eventBytes)
+	}
+}
+
+func (c *Client) handleReaction(data []byte) {
+	var msg ReactionMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		c.sendError("Invalid reaction format")
+		return
+	}
+
+	if msg.MessageID == "" {
+		c.sendError("Message ID is required")
+		return
+	}
+
+	if msg.Action != "add" && msg.Action != "remove" {
+		c.sendError("Action must be 'add' or 'remove'")
+		return
+	}
+
+	if msg.Action == "add" && msg.Emoji == "" {
+		c.sendError("Emoji is required for add action")
+		return
+	}
+
+	// Find the message
+	var message models.Message
+	if err := database.DB.First(&message, "id = ?", msg.MessageID).Error; err != nil {
+		c.sendError("Message not found")
+		return
+	}
+
+	// Check if user has access to this message
+	if message.IsGroupMessage() {
+		// Check group membership
+		var membership models.GroupMember
+		if err := database.DB.Where("group_id = ? AND user_id = ?", *message.GroupID, c.UserID).First(&membership).Error; err != nil {
+			c.sendError("You don't have access to this message")
+			return
+		}
+	} else {
+		// For DMs, user must be sender or recipient
+		if message.SenderID != c.UserID && (message.RecipientID == nil || *message.RecipientID != c.UserID) {
+			c.sendError("You don't have access to this message")
+			return
+		}
+	}
+
+	var action string
+	if msg.Action == "add" {
+		_, err := models.AddReaction(database.DB, msg.MessageID, c.UserID, msg.Emoji)
+		if err != nil {
+			c.sendError("Failed to add reaction")
+			return
+		}
+		action = "added"
+	} else {
+		if err := models.RemoveReaction(database.DB, msg.MessageID, c.UserID); err != nil {
+			c.sendError("Failed to remove reaction")
+			return
+		}
+		action = "removed"
+	}
+
+	// Get updated reaction info
+	reactionInfo, _ := models.GetMessageReactionInfo(database.DB, msg.MessageID)
+
+	// Convert to websocket type
+	var wsReactions []ReactionInfo
+	for _, ri := range reactionInfo {
+		wsReactions = append(wsReactions, ReactionInfo{
+			Emoji: ri.Emoji,
+			Count: ri.Count,
+			Users: ri.Users,
+		})
+	}
+
+	// Prepare reaction event
+	event := ReactionEvent{
+		Type:      "reaction",
+		MessageID: msg.MessageID,
+		UserID:    c.UserID,
+		Emoji:     msg.Emoji,
+		Action:    action,
+		Reactions: wsReactions,
+	}
+	eventBytes, _ := json.Marshal(event)
+
+	// Send to self
+	c.Send <- eventBytes
+
+	// Broadcast to other participants
+	if message.IsGroupMessage() {
+		c.Hub.SendToGroup(*message.GroupID, c.UserID, eventBytes)
+	} else if message.RecipientID != nil {
+		// Send to the other person in the DM
+		otherUserID := message.SenderID
+		if message.SenderID == c.UserID {
+			otherUserID = *message.RecipientID
+		}
+		c.Hub.SendToUser(otherUserID, eventBytes)
 	}
 }
 

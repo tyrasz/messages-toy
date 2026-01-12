@@ -1,3 +1,5 @@
+import 'reaction.dart';
+
 enum MessageStatus { sent, delivered, read }
 
 enum MediaType { none, image, video, audio, document }
@@ -50,6 +52,7 @@ class Message {
   final MessageStatus status;
   final DateTime? editedAt;  // When message was edited
   final bool isDeleted;      // Whether message is deleted for everyone
+  final List<ReactionInfo> reactions; // Reactions on this message
   final DateTime createdAt;
 
   Message({
@@ -72,6 +75,7 @@ class Message {
     this.status = MessageStatus.sent,
     this.editedAt,
     this.isDeleted = false,
+    this.reactions = const [],
     required this.createdAt,
   });
 
@@ -81,6 +85,7 @@ class Message {
   bool get isVideoMessage => mediaType == MediaType.video;
   bool get isAudioMessage => mediaType == MediaType.audio;
   bool get isDocumentMessage => mediaType == MediaType.document;
+  bool get hasReactions => reactions.isNotEmpty;
   String get displayContent => isDeleted ? '[Message deleted]' : (content ?? '');
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -109,6 +114,10 @@ class Message {
           ? DateTime.parse(json['edited_at'] as String)
           : null,
       isDeleted: json['deleted_at'] != null,
+      reactions: (json['reactions'] as List<dynamic>?)
+              ?.map((r) => ReactionInfo.fromJson(r as Map<String, dynamic>))
+              .toList() ??
+          [],
       createdAt: json['created_at'] != null
           ? DateTime.parse(json['created_at'] as String)
           : DateTime.now(),
@@ -179,6 +188,7 @@ class Message {
     MessageStatus? status,
     DateTime? editedAt,
     bool? isDeleted,
+    List<ReactionInfo>? reactions,
     DateTime? createdAt,
   }) {
     return Message(
@@ -201,6 +211,7 @@ class Message {
       status: status ?? this.status,
       editedAt: editedAt ?? this.editedAt,
       isDeleted: isDeleted ?? this.isDeleted,
+      reactions: reactions ?? this.reactions,
       createdAt: createdAt ?? this.createdAt,
     );
   }
