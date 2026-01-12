@@ -104,6 +104,10 @@ func (c *Client) handleMessage(data []byte) {
 		c.handleTypingMessage(data)
 	case "ack":
 		c.handleAckMessage(data)
+	case "message_edit":
+		c.handleMessageEdit(data)
+	case "message_delete":
+		c.handleMessageDelete(data)
 	default:
 		c.sendError("Unknown message type")
 	}
@@ -151,6 +155,12 @@ func (c *Client) handleChatMessage(data []byte) {
 }
 
 func (c *Client) handleDirectMessage(msg ChatMessage) {
+	// Check if either user has blocked the other
+	if models.IsEitherBlocked(database.DB, c.UserID, msg.To) {
+		c.sendError("Cannot send message to this user")
+		return
+	}
+
 	// Save message to database
 	message := models.Message{
 		SenderID:    c.UserID,
@@ -291,6 +301,11 @@ func (c *Client) handleTypingMessage(data []byte) {
 		return
 	}
 
+	// Don't forward typing indicator if blocked
+	if models.IsEitherBlocked(database.DB, c.UserID, msg.To) {
+		return
+	}
+
 	// Forward typing indicator to recipient
 	outMsg := struct {
 		Type   string `json:"type"`
@@ -329,6 +344,139 @@ func (c *Client) handleAckMessage(data []byte) {
 			ackBytes, _ := json.Marshal(readAck)
 			c.Hub.SendToUser(message.SenderID, ackBytes)
 		}
+	}
+}
+
+func (c *Client) handleMessageEdit(data []byte) {
+	var msg EditMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		c.sendError("Invalid message format")
+		return
+	}
+
+	if msg.MessageID == "" || msg.Content == "" {
+		c.sendError("Message ID and content are required")
+		return
+	}
+
+	// Find the message
+	var message models.Message
+	if err := database.DB.First(&message, "id = ?", msg.MessageID).Error; err != nil {
+		c.sendError("Message not found")
+		return
+	}
+
+	// Verify sender owns the message
+	if message.SenderID != c.UserID {
+		c.sendError("You can only edit your own messages")
+		return
+	}
+
+	// Check if message is deleted
+	if message.IsDeleted() {
+		c.sendError("Cannot edit a deleted message")
+		return
+	}
+
+	// Update the message
+	now := time.Now()
+	if err := database.DB.Model(&message).Updates(map[string]interface{}{
+		"content":   msg.Content,
+		"edited_at": now,
+	}).Error; err != nil {
+		c.sendError("Failed to edit message")
+		return
+	}
+
+	// Prepare edit event
+	editEvent := MessageEditedEvent{
+		Type:      "message_edited",
+		MessageID: message.ID,
+		Content:   msg.Content,
+		EditedAt:  now.Format(time.RFC3339),
+	}
+	eventBytes, _ := json.Marshal(editEvent)
+
+	// Send to self
+	c.Send <- eventBytes
+
+	// Broadcast to recipient(s)
+	if message.IsGroupMessage() {
+		c.Hub.SendToGroup(*message.GroupID, c.UserID, eventBytes)
+	} else if message.RecipientID != nil {
+		c.Hub.SendToUser(*message.RecipientID, eventBytes)
+	}
+}
+
+func (c *Client) handleMessageDelete(data []byte) {
+	var msg DeleteMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		c.sendError("Invalid message format")
+		return
+	}
+
+	if msg.MessageID == "" {
+		c.sendError("Message ID is required")
+		return
+	}
+
+	// Find the message
+	var message models.Message
+	if err := database.DB.First(&message, "id = ?", msg.MessageID).Error; err != nil {
+		c.sendError("Message not found")
+		return
+	}
+
+	// Handle "delete for me"
+	if msg.DeleteFor == "me" {
+		// Create a deletion record for this user
+		deletion := models.MessageDeletion{
+			MessageID: msg.MessageID,
+			UserID:    c.UserID,
+			DeletedAt: time.Now(),
+		}
+		if err := database.DB.Create(&deletion).Error; err != nil {
+			// Might already exist, that's okay
+		}
+
+		// Send delete event only to self
+		deleteEvent := MessageDeletedEvent{
+			Type:      "message_deleted",
+			MessageID: message.ID,
+		}
+		eventBytes, _ := json.Marshal(deleteEvent)
+		c.Send <- eventBytes
+		return
+	}
+
+	// Handle "delete for everyone" - only sender can do this
+	if message.SenderID != c.UserID {
+		c.sendError("You can only delete your own messages for everyone")
+		return
+	}
+
+	// Soft delete the message
+	now := time.Now()
+	if err := database.DB.Model(&message).Update("deleted_at", now).Error; err != nil {
+		c.sendError("Failed to delete message")
+		return
+	}
+
+	// Prepare delete event
+	deleteEvent := MessageDeletedEvent{
+		Type:      "message_deleted",
+		MessageID: message.ID,
+	}
+	eventBytes, _ := json.Marshal(deleteEvent)
+
+	// Send to self
+	c.Send <- eventBytes
+
+	// Broadcast to recipient(s)
+	if message.IsGroupMessage() {
+		c.Hub.SendToGroup(*message.GroupID, c.UserID, eventBytes)
+	} else if message.RecipientID != nil {
+		c.Hub.SendToUser(*message.RecipientID, eventBytes)
 	}
 }
 

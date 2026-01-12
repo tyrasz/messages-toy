@@ -1,5 +1,7 @@
 enum MessageStatus { sent, delivered, read }
 
+enum MediaType { none, image, video, audio, document }
+
 class ReplyPreview {
   final String id;
   final String senderId;
@@ -38,7 +40,16 @@ class Message {
   final String? content;
   final String? mediaId;
   final String? mediaUrl;
+  final String? mediaContentType;
+  final MediaType mediaType;
+  final String? thumbnailUrl;
+  final int? mediaDuration;      // Duration in seconds for audio/video
+  final int? mediaWidth;
+  final int? mediaHeight;
+  final int? pageCount;          // For documents
   final MessageStatus status;
+  final DateTime? editedAt;  // When message was edited
+  final bool isDeleted;      // Whether message is deleted for everyone
   final DateTime createdAt;
 
   Message({
@@ -51,11 +62,29 @@ class Message {
     this.content,
     this.mediaId,
     this.mediaUrl,
+    this.mediaContentType,
+    this.mediaType = MediaType.none,
+    this.thumbnailUrl,
+    this.mediaDuration,
+    this.mediaWidth,
+    this.mediaHeight,
+    this.pageCount,
     this.status = MessageStatus.sent,
+    this.editedAt,
+    this.isDeleted = false,
     required this.createdAt,
   });
 
+  bool get isEdited => editedAt != null;
+  bool get hasMedia => mediaId != null;
+  bool get isImageMessage => mediaType == MediaType.image;
+  bool get isVideoMessage => mediaType == MediaType.video;
+  bool get isAudioMessage => mediaType == MediaType.audio;
+  bool get isDocumentMessage => mediaType == MediaType.document;
+  String get displayContent => isDeleted ? '[Message deleted]' : (content ?? '');
+
   factory Message.fromJson(Map<String, dynamic> json) {
+    final media = json['media'] as Map<String, dynamic>?;
     return Message(
       id: json['id'] as String,
       senderId: json['sender_id'] ?? json['from'] as String,
@@ -67,8 +96,19 @@ class Message {
           : null,
       content: json['content'] as String?,
       mediaId: json['media_id'] as String?,
-      mediaUrl: json['media']?['url'] as String?,
+      mediaUrl: media?['url'] as String?,
+      mediaContentType: media?['content_type'] as String?,
+      mediaType: _parseMediaType(media?['media_type'] as String?),
+      thumbnailUrl: media?['thumbnail_url'] as String?,
+      mediaDuration: media?['duration'] as int?,
+      mediaWidth: media?['width'] as int?,
+      mediaHeight: media?['height'] as int?,
+      pageCount: media?['page_count'] as int?,
       status: _parseStatus(json['status'] as String?),
+      editedAt: json['edited_at'] != null
+          ? DateTime.parse(json['edited_at'] as String)
+          : null,
+      isDeleted: json['deleted_at'] != null,
       createdAt: json['created_at'] != null
           ? DateTime.parse(json['created_at'] as String)
           : DateTime.now(),
@@ -83,6 +123,21 @@ class Message {
         return MessageStatus.read;
       default:
         return MessageStatus.sent;
+    }
+  }
+
+  static MediaType _parseMediaType(String? type) {
+    switch (type) {
+      case 'image':
+        return MediaType.image;
+      case 'video':
+        return MediaType.video;
+      case 'audio':
+        return MediaType.audio;
+      case 'document':
+        return MediaType.document;
+      default:
+        return MediaType.none;
     }
   }
 
@@ -114,7 +169,16 @@ class Message {
     String? content,
     String? mediaId,
     String? mediaUrl,
+    String? mediaContentType,
+    MediaType? mediaType,
+    String? thumbnailUrl,
+    int? mediaDuration,
+    int? mediaWidth,
+    int? mediaHeight,
+    int? pageCount,
     MessageStatus? status,
+    DateTime? editedAt,
+    bool? isDeleted,
     DateTime? createdAt,
   }) {
     return Message(
@@ -127,7 +191,16 @@ class Message {
       content: content ?? this.content,
       mediaId: mediaId ?? this.mediaId,
       mediaUrl: mediaUrl ?? this.mediaUrl,
+      mediaContentType: mediaContentType ?? this.mediaContentType,
+      mediaType: mediaType ?? this.mediaType,
+      thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
+      mediaDuration: mediaDuration ?? this.mediaDuration,
+      mediaWidth: mediaWidth ?? this.mediaWidth,
+      mediaHeight: mediaHeight ?? this.mediaHeight,
+      pageCount: pageCount ?? this.pageCount,
       status: status ?? this.status,
+      editedAt: editedAt ?? this.editedAt,
+      isDeleted: isDeleted ?? this.isDeleted,
       createdAt: createdAt ?? this.createdAt,
     );
   }

@@ -141,8 +141,12 @@ func (h *Hub) broadcastPresence(userID string, online bool) {
 
 	msgBytes, _ := json.Marshal(presenceMsg)
 
-	// Notify each contact
+	// Notify each contact (unless blocked)
 	for _, contact := range contacts {
+		// Don't send presence to blocked users or users who blocked this user
+		if models.IsEitherBlocked(database.DB, userID, contact.UserID) {
+			continue
+		}
 		h.SendToUser(contact.UserID, msgBytes)
 	}
 }
@@ -195,4 +199,30 @@ type AckMessage struct {
 type ErrorMessage struct {
 	Type  string `json:"type"`
 	Error string `json:"error"`
+}
+
+// Message editing types
+type EditMessage struct {
+	Type      string `json:"type"`
+	MessageID string `json:"message_id"`
+	Content   string `json:"content"`
+}
+
+type MessageEditedEvent struct {
+	Type      string `json:"type"`
+	MessageID string `json:"message_id"`
+	Content   string `json:"content"`
+	EditedAt  string `json:"edited_at"`
+}
+
+// Message deletion types
+type DeleteMessage struct {
+	Type      string `json:"type"`
+	MessageID string `json:"message_id"`
+	DeleteFor string `json:"delete_for"` // "me" or "everyone"
+}
+
+type MessageDeletedEvent struct {
+	Type      string `json:"type"`
+	MessageID string `json:"message_id"`
 }

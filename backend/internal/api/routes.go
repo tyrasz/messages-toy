@@ -35,6 +35,13 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	contacts.Post("/", contactsHandler.Add)
 	contacts.Delete("/:id", contactsHandler.Remove)
 
+	// Blocks
+	blocks := protected.Group("/blocks")
+	blocks.Get("/", contactsHandler.ListBlocked)
+	blocks.Post("/:userId", contactsHandler.Block)
+	blocks.Delete("/:userId", contactsHandler.Unblock)
+	blocks.Get("/:userId", contactsHandler.IsBlocked)
+
 	// Messages
 	messagesHandler := handlers.NewMessagesHandler()
 	messages := protected.Group("/messages")

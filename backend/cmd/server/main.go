@@ -22,10 +22,12 @@ func main() {
 	database.Migrate(
 		&models.User{},
 		&models.Message{},
+		&models.MessageDeletion{},
 		&models.Contact{},
 		&models.Media{},
 		&models.Group{},
 		&models.GroupMember{},
+		&models.Block{},
 	)
 
 	// Create WebSocket hub

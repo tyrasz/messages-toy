@@ -16,18 +16,34 @@ const (
 	MediaStatusReview   MediaStatus = "review"
 )
 
+type MediaType string
+
+const (
+	MediaTypeImage    MediaType = "image"
+	MediaTypeVideo    MediaType = "video"
+	MediaTypeAudio    MediaType = "audio"
+	MediaTypeDocument MediaType = "document"
+)
+
 type Media struct {
-	ID          string      `gorm:"primaryKey" json:"id"`
-	UploaderID  string      `gorm:"not null;index" json:"uploader_id"`
-	Filename    string      `gorm:"not null" json:"filename"`
-	ContentType string      `gorm:"not null" json:"content_type"`
-	Size        int64       `json:"size"`
-	Status      MediaStatus `gorm:"default:pending" json:"status"`
-	ScanResult  string      `gorm:"type:text" json:"scan_result,omitempty"`
-	StoragePath string      `json:"storage_path,omitempty"`
-	URL         string      `json:"url,omitempty"`
-	CreatedAt   time.Time   `json:"created_at"`
-	UpdatedAt   time.Time   `json:"updated_at"`
+	ID            string      `gorm:"primaryKey" json:"id"`
+	UploaderID    string      `gorm:"not null;index" json:"uploader_id"`
+	Filename      string      `gorm:"not null" json:"filename"`
+	ContentType   string      `gorm:"not null" json:"content_type"`
+	MediaType     MediaType   `json:"media_type"`
+	Size          int64       `json:"size"`
+	Status        MediaStatus `gorm:"default:pending" json:"status"`
+	ScanResult    string      `gorm:"type:text" json:"scan_result,omitempty"`
+	StoragePath   string      `json:"storage_path,omitempty"`
+	URL           string      `json:"url,omitempty"`
+	ThumbnailPath string      `json:"thumbnail_path,omitempty"`
+	ThumbnailURL  string      `json:"thumbnail_url,omitempty"`
+	Duration      *int        `json:"duration,omitempty"`       // Duration in seconds for audio/video
+	Width         *int        `json:"width,omitempty"`          // For images/videos
+	Height        *int        `json:"height,omitempty"`         // For images/videos
+	PageCount     *int        `json:"page_count,omitempty"`     // For documents
+	CreatedAt     time.Time   `json:"created_at"`
+	UpdatedAt     time.Time   `json:"updated_at"`
 
 	Uploader User `gorm:"foreignKey:UploaderID" json:"-"`
 }

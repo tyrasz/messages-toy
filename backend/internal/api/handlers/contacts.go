@@ -139,3 +139,118 @@ func (h *ContactsHandler) Remove(c *fiber.Ctx) error {
 		"message": "Contact removed successfully",
 	})
 }
+
+// Block adds a user to the blocker's block list
+func (h *ContactsHandler) Block(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	blockedUserID := c.Params("userId")
+
+	if blockedUserID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "User ID is required",
+		})
+	}
+
+	// Can't block yourself
+	if blockedUserID == userID {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Cannot block yourself",
+		})
+	}
+
+	// Check if user exists
+	var blockedUser models.User
+	if err := database.DB.First(&blockedUser, "id = ?", blockedUserID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "User not found",
+		})
+	}
+
+	// Check if already blocked
+	var existingBlock models.Block
+	if err := database.DB.Where("blocker_id = ? AND blocked_id = ?", userID, blockedUserID).First(&existingBlock).Error; err == nil {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error": "User is already blocked",
+		})
+	}
+
+	// Create block
+	block := models.Block{
+		BlockerID: userID,
+		BlockedID: blockedUserID,
+	}
+
+	if err := database.DB.Create(&block).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to block user",
+		})
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"id":           block.ID,
+		"blocked_id":   block.BlockedID,
+		"blocked_user": blockedUser.ToResponse(false),
+		"created_at":   block.CreatedAt,
+	})
+}
+
+// Unblock removes a user from the blocker's block list
+func (h *ContactsHandler) Unblock(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	blockedUserID := c.Params("userId")
+
+	result := database.DB.Where("blocker_id = ? AND blocked_id = ?", userID, blockedUserID).Delete(&models.Block{})
+	if result.Error != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to unblock user",
+		})
+	}
+
+	if result.RowsAffected == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Block not found",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "User unblocked successfully",
+	})
+}
+
+// ListBlocked returns all users blocked by the current user
+func (h *ContactsHandler) ListBlocked(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+
+	var blocks []models.Block
+	if err := database.DB.Preload("Blocked").Where("blocker_id = ?", userID).Find(&blocks).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to fetch blocked users",
+		})
+	}
+
+	response := make([]fiber.Map, len(blocks))
+	for i, block := range blocks {
+		response[i] = fiber.Map{
+			"id":           block.ID,
+			"blocked_id":   block.BlockedID,
+			"blocked_user": block.Blocked.ToResponse(false),
+			"created_at":   block.CreatedAt,
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"blocked": response,
+	})
+}
+
+// IsBlocked checks if either user has blocked the other (for internal use)
+func (h *ContactsHandler) IsBlocked(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	otherUserID := c.Params("userId")
+
+	blocked := models.IsEitherBlocked(database.DB, userID, otherUserID)
+
+	return c.JSON(fiber.Map{
+		"blocked": blocked,
+	})
+}

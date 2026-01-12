@@ -27,6 +27,14 @@ func NewMediaHandler(hub *websocket.Hub) *MediaHandler {
 	}
 }
 
+// Size limits per media type
+const (
+	MaxImageSize    = 10 * 1024 * 1024  // 10MB
+	MaxVideoSize    = 100 * 1024 * 1024 // 100MB
+	MaxAudioSize    = 50 * 1024 * 1024  // 50MB
+	MaxDocumentSize = 50 * 1024 * 1024  // 50MB
+)
+
 func (h *MediaHandler) Upload(c *fiber.Ctx) error {
 	userID := middleware.GetUserID(c)
 
@@ -39,16 +47,18 @@ func (h *MediaHandler) Upload(c *fiber.Ctx) error {
 
 	// Validate file type
 	contentType := file.Header.Get("Content-Type")
-	if !isAllowedMediaType(contentType) {
+	mediaType := getMediaType(contentType)
+	if mediaType == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "File type not allowed. Allowed types: jpg, png, gif, webp",
+			"error": "File type not allowed. Allowed types: images (jpg, png, gif, webp), videos (mp4, webm, mov), audio (mp3, m4a, ogg, wav), documents (pdf, doc, docx, xls, xlsx)",
 		})
 	}
 
-	// Validate file size (10MB max)
-	if file.Size > 10*1024*1024 {
+	// Validate file size based on media type
+	maxSize := getMaxSize(mediaType)
+	if file.Size > maxSize {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "File too large. Maximum size is 10MB",
+			"error": fmt.Sprintf("File too large. Maximum size for %s is %dMB", mediaType, maxSize/1024/1024),
 		})
 	}
 
@@ -77,6 +87,7 @@ func (h *MediaHandler) Upload(c *fiber.Ctx) error {
 		UploaderID:  userID,
 		Filename:    filename,
 		ContentType: contentType,
+		MediaType:   mediaType,
 		Size:        file.Size,
 		Status:      models.MediaStatusPending,
 		StoragePath: quarantinePath,
@@ -93,14 +104,47 @@ func (h *MediaHandler) Upload(c *fiber.Ctx) error {
 	go h.processModeration(&media)
 
 	return c.Status(fiber.StatusAccepted).JSON(fiber.Map{
-		"id":      media.ID,
-		"status":  media.Status,
-		"message": "File uploaded and pending moderation",
+		"id":         media.ID,
+		"status":     media.Status,
+		"media_type": media.MediaType,
+		"message":    "File uploaded and pending moderation",
 	})
 }
 
 func (h *MediaHandler) processModeration(media *models.Media) {
-	result, err := h.moderationService.ScanImage(media.StoragePath)
+	var result *services.ScanResult
+	var err error
+
+	switch media.MediaType {
+	case models.MediaTypeImage:
+		// Scan images with GCP Vision
+		result, err = h.moderationService.ScanImage(media.StoragePath)
+	case models.MediaTypeVideo:
+		// For videos, we could extract frames and scan them
+		// For now, auto-approve with scan note
+		result = &services.ScanResult{
+			Status:    models.MediaStatusApproved,
+			RawResult: "Video auto-approved (frame scanning not implemented)",
+		}
+	case models.MediaTypeAudio:
+		// For audio, auto-approve (could implement speech-to-text moderation later)
+		result = &services.ScanResult{
+			Status:    models.MediaStatusApproved,
+			RawResult: "Audio auto-approved",
+		}
+	case models.MediaTypeDocument:
+		// For documents, auto-approve (could implement PDF preview scanning later)
+		result = &services.ScanResult{
+			Status:    models.MediaStatusApproved,
+			RawResult: "Document auto-approved",
+		}
+	default:
+		result = &services.ScanResult{
+			Status:    models.MediaStatusReview,
+			RawResult: "Unknown media type",
+		}
+	}
+
 	if err != nil {
 		// If moderation fails, mark for manual review
 		database.DB.Model(media).Updates(map[string]interface{}{
@@ -164,17 +208,71 @@ func (h *MediaHandler) Get(c *fiber.Ctx) error {
 	return c.SendFile(media.StoragePath)
 }
 
-func isAllowedMediaType(contentType string) bool {
-	allowed := []string{
-		"image/jpeg",
-		"image/png",
-		"image/gif",
-		"image/webp",
+// getMediaType returns the media type category for a given content type
+func getMediaType(contentType string) models.MediaType {
+	ct := strings.ToLower(contentType)
+
+	// Image types
+	imageTypes := []string{
+		"image/jpeg", "image/png", "image/gif", "image/webp",
 	}
-	for _, a := range allowed {
-		if strings.EqualFold(contentType, a) {
-			return true
+	for _, t := range imageTypes {
+		if ct == t {
+			return models.MediaTypeImage
 		}
 	}
-	return false
+
+	// Video types
+	videoTypes := []string{
+		"video/mp4", "video/webm", "video/quicktime", "video/x-msvideo",
+	}
+	for _, t := range videoTypes {
+		if ct == t {
+			return models.MediaTypeVideo
+		}
+	}
+
+	// Audio types
+	audioTypes := []string{
+		"audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg",
+		"audio/webm", "audio/wav", "audio/x-wav",
+	}
+	for _, t := range audioTypes {
+		if ct == t {
+			return models.MediaTypeAudio
+		}
+	}
+
+	// Document types
+	documentTypes := []string{
+		"application/pdf",
+		"application/msword",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		"application/vnd.ms-excel",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		"text/plain",
+	}
+	for _, t := range documentTypes {
+		if ct == t {
+			return models.MediaTypeDocument
+		}
+	}
+
+	return "" // Unknown/not allowed
+}
+
+// getMaxSize returns the maximum file size for a given media type
+func getMaxSize(mediaType models.MediaType) int64 {
+	switch mediaType {
+	case models.MediaTypeImage:
+		return MaxImageSize
+	case models.MediaTypeVideo:
+		return MaxVideoSize
+	case models.MediaTypeAudio:
+		return MaxAudioSize
+	case models.MediaTypeDocument:
+		return MaxDocumentSize
+	default:
+		return MaxImageSize // Default to image size
+	}
 }

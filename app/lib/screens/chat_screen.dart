@@ -6,6 +6,7 @@ import '../models/user.dart';
 import '../models/message.dart';
 import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
+import '../providers/blocks_provider.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final User user;
@@ -81,6 +82,41 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     setState(() => _replyingTo = null);
   }
 
+  void _onEdit(Message message) {
+    final controller = TextEditingController(text: message.content);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Message'),
+        content: TextField(
+          controller: controller,
+          maxLines: 4,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Edit your message...',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              final newContent = controller.text.trim();
+              if (newContent.isNotEmpty && newContent != message.content) {
+                ref.read(chatProvider.notifier).editMessage(message.id, newContent);
+              }
+              Navigator.pop(context);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _pickAndSendImage() async {
     final picker = ImagePicker();
     final image = await picker.pickImage(source: ImageSource.gallery);
@@ -108,12 +144,59 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
+  Future<void> _handleBlockUser() async {
+    final blocksNotifier = ref.read(blocksProvider.notifier);
+    final isBlocked = ref.read(blocksProvider).isUserBlocked(widget.user.id);
+
+    if (isBlocked) {
+      final success = await blocksNotifier.unblockUser(widget.user.id);
+      if (success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${widget.user.displayNameOrUsername} unblocked')),
+        );
+      }
+    } else {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Block User'),
+          content: Text(
+            'Are you sure you want to block ${widget.user.displayNameOrUsername}? '
+            'They won\'t be able to send you messages or see when you\'re online.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Block'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed == true) {
+        final success = await blocksNotifier.blockUser(widget.user.id);
+        if (success && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('${widget.user.displayNameOrUsername} blocked')),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final chatState = ref.watch(chatProvider);
     final authState = ref.watch(authProvider);
+    final blocksState = ref.watch(blocksProvider);
     final messages = chatState.messages[widget.user.id] ?? [];
     final isTyping = chatState.typingStatus[widget.user.id] ?? false;
+    final isBlocked = blocksState.isUserBlocked(widget.user.id);
 
     return Scaffold(
       appBar: AppBar(
@@ -132,20 +215,50 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   style: const TextStyle(fontSize: 16),
                 ),
                 Text(
-                  widget.user.online
-                      ? 'Online'
-                      : isTyping
-                          ? 'Typing...'
-                          : 'Offline',
+                  isBlocked
+                      ? 'Blocked'
+                      : widget.user.online
+                          ? 'Online'
+                          : isTyping
+                              ? 'Typing...'
+                              : 'Offline',
                   style: TextStyle(
                     fontSize: 12,
-                    color: widget.user.online ? Colors.green : Colors.grey,
+                    color: isBlocked
+                        ? Colors.red
+                        : widget.user.online
+                            ? Colors.green
+                            : Colors.grey,
                   ),
                 ),
               ],
             ),
           ],
         ),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'block') {
+                _handleBlockUser();
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'block',
+                child: Row(
+                  children: [
+                    Icon(
+                      isBlocked ? Icons.lock_open : Icons.block,
+                      color: isBlocked ? Colors.green : Colors.red,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(isBlocked ? 'Unblock' : 'Block'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -190,6 +303,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         isMe: isMe,
                         currentUserId: authState.user?.id,
                         onReply: () => _onReply(message),
+                        onEdit: _onEdit,
                       );
                     },
                   ),
@@ -269,100 +383,186 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
             ),
 
-          // Message input
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Theme.of(context).scaffoldBackgroundColor,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 4,
-                  offset: const Offset(0, -2),
+          // Message input or blocked message
+          if (isBlocked)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.red[50],
+                border: Border(
+                  top: BorderSide(color: Colors.red[200]!),
                 ),
-              ],
-            ),
-            child: SafeArea(
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.add_photo_alternate_outlined),
-                    onPressed: _pickAndSendImage,
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: _messageController,
-                      decoration: InputDecoration(
-                        hintText: 'Type a message...',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        filled: true,
-                        fillColor: Colors.grey[200],
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                      ),
-                      maxLines: 4,
-                      minLines: 1,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _sendMessage(),
+              ),
+              child: SafeArea(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.block, color: Colors.red[400], size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'You have blocked this user',
+                      style: TextStyle(color: Colors.red[700]),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    icon: const Icon(Icons.send),
-                    onPressed: _sendMessage,
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: _handleBlockUser,
+                      child: const Text('Unblock'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 4,
+                    offset: const Offset(0, -2),
                   ),
                 ],
               ),
+              child: SafeArea(
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.add_photo_alternate_outlined),
+                      onPressed: _pickAndSendImage,
+                    ),
+                    Expanded(
+                      child: TextField(
+                        controller: _messageController,
+                        decoration: InputDecoration(
+                          hintText: 'Type a message...',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24),
+                            borderSide: BorderSide.none,
+                          ),
+                          filled: true,
+                          fillColor: Colors.grey[200],
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                        ),
+                        maxLines: 4,
+                        minLines: 1,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _sendMessage(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.filled(
+                      icon: const Icon(Icons.send),
+                      onPressed: _sendMessage,
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
         ],
       ),
     );
   }
 }
 
-class _SwipeableMessageBubble extends StatelessWidget {
+class _SwipeableMessageBubble extends ConsumerWidget {
   final Message message;
   final bool isMe;
   final String? currentUserId;
   final VoidCallback onReply;
+  final void Function(Message) onEdit;
 
   const _SwipeableMessageBubble({
     required this.message,
     required this.isMe,
     required this.currentUserId,
     required this.onReply,
+    required this.onEdit,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    return Dismissible(
-      key: Key(message.id),
-      direction: isMe ? DismissDirection.endToStart : DismissDirection.startToEnd,
-      confirmDismiss: (direction) async {
-        onReply();
-        return false; // Don't actually dismiss
-      },
-      background: Container(
-        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-        padding: EdgeInsets.only(
-          left: isMe ? 0 : 20,
-          right: isMe ? 20 : 0,
-        ),
-        child: Icon(
-          Icons.reply,
-          color: Colors.grey[400],
+  void _showMessageOptions(BuildContext context, WidgetRef ref) {
+    if (message.isDeleted) return;
+
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.reply),
+              title: const Text('Reply'),
+              onTap: () {
+                Navigator.pop(context);
+                onReply();
+              },
+            ),
+            if (isMe && message.content != null) ...[
+              ListTile(
+                leading: const Icon(Icons.edit),
+                title: const Text('Edit'),
+                onTap: () {
+                  Navigator.pop(context);
+                  onEdit(message);
+                },
+              ),
+            ],
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Delete for me'),
+              onTap: () {
+                Navigator.pop(context);
+                ref.read(chatProvider.notifier).deleteMessage(message.id, forEveryone: false);
+              },
+            ),
+            if (isMe)
+              ListTile(
+                leading: Icon(Icons.delete_forever, color: Colors.red[400]),
+                title: Text('Delete for everyone', style: TextStyle(color: Colors.red[400])),
+                onTap: () {
+                  Navigator.pop(context);
+                  ref.read(chatProvider.notifier).deleteMessage(message.id, forEveryone: true);
+                },
+              ),
+          ],
         ),
       ),
-      child: _MessageBubble(
-        message: message,
-        isMe: isMe,
-        currentUserId: currentUserId,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return GestureDetector(
+      onLongPress: () => _showMessageOptions(context, ref),
+      child: Dismissible(
+        key: Key(message.id),
+        direction: message.isDeleted
+            ? DismissDirection.none
+            : (isMe ? DismissDirection.endToStart : DismissDirection.startToEnd),
+        confirmDismiss: (direction) async {
+          onReply();
+          return false; // Don't actually dismiss
+        },
+        background: Container(
+          alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+          padding: EdgeInsets.only(
+            left: isMe ? 0 : 20,
+            right: isMe ? 20 : 0,
+          ),
+          child: Icon(
+            Icons.reply,
+            color: Colors.grey[400],
+          ),
+        ),
+        child: _MessageBubble(
+          message: message,
+          isMe: isMe,
+          currentUserId: currentUserId,
+        ),
       ),
     );
   }
@@ -446,7 +646,15 @@ class _MessageBubble extends StatelessWidget {
               ),
             ],
             // Message content
-            if (message.content != null)
+            if (message.isDeleted)
+              Text(
+                '[Message deleted]',
+                style: TextStyle(
+                  color: isMe ? Colors.white60 : Colors.grey[500],
+                  fontStyle: FontStyle.italic,
+                ),
+              )
+            else if (message.content != null)
               Text(
                 message.content!,
                 style: TextStyle(
@@ -464,7 +672,18 @@ class _MessageBubble extends StatelessWidget {
                     color: isMe ? Colors.white70 : Colors.grey[600],
                   ),
                 ),
-                if (isMe) ...[
+                if (message.isEdited && !message.isDeleted) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    '(edited)',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: isMe ? Colors.white60 : Colors.grey[500],
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+                if (isMe && !message.isDeleted) ...[
                   const SizedBox(width: 4),
                   Icon(
                     _getStatusIcon(message.status),

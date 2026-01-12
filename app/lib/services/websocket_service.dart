@@ -20,12 +20,16 @@ class WebSocketService {
   final _presenceController = StreamController<Map<String, dynamic>>.broadcast();
   final _ackController = StreamController<Map<String, dynamic>>.broadcast();
   final _statusController = StreamController<ConnectionStatus>.broadcast();
+  final _messageEditedController = StreamController<Map<String, dynamic>>.broadcast();
+  final _messageDeletedController = StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<Message> get messageStream => _messageController.stream;
   Stream<Map<String, dynamic>> get typingStream => _typingController.stream;
   Stream<Map<String, dynamic>> get presenceStream => _presenceController.stream;
   Stream<Map<String, dynamic>> get ackStream => _ackController.stream;
   Stream<ConnectionStatus> get statusStream => _statusController.stream;
+  Stream<Map<String, dynamic>> get messageEditedStream => _messageEditedController.stream;
+  Stream<Map<String, dynamic>> get messageDeletedStream => _messageDeletedController.stream;
 
   ConnectionStatus get status => _status;
   bool get isConnected => _status == ConnectionStatus.connected;
@@ -79,6 +83,12 @@ class WebSocketService {
           break;
         case 'ack':
           _ackController.add(json);
+          break;
+        case 'message_edited':
+          _messageEditedController.add(json);
+          break;
+        case 'message_deleted':
+          _messageDeletedController.add(json);
           break;
         case 'error':
           print('Server error: ${json['error']}');
@@ -175,6 +185,30 @@ class WebSocketService {
     _channel?.sink.add(jsonEncode(message));
   }
 
+  void sendMessageEdit({required String messageId, required String content}) {
+    if (!isConnected) return;
+
+    final message = {
+      'type': 'message_edit',
+      'message_id': messageId,
+      'content': content,
+    };
+
+    _channel?.sink.add(jsonEncode(message));
+  }
+
+  void sendMessageDelete({required String messageId, required String deleteFor}) {
+    if (!isConnected) return;
+
+    final message = {
+      'type': 'message_delete',
+      'message_id': messageId,
+      'delete_for': deleteFor, // "me" or "everyone"
+    };
+
+    _channel?.sink.add(jsonEncode(message));
+  }
+
   void disconnect() {
     _reconnectTimer?.cancel();
     _stopPingTimer();
@@ -191,5 +225,7 @@ class WebSocketService {
     _presenceController.close();
     _ackController.close();
     _statusController.close();
+    _messageEditedController.close();
+    _messageDeletedController.close();
   }
 }

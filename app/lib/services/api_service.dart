@@ -5,6 +5,7 @@ import '../models/contact.dart';
 import '../models/message.dart';
 import '../models/conversation.dart';
 import '../models/group.dart';
+import '../models/block.dart';
 
 class ApiService {
   static const String baseUrl = 'http://localhost:8080/api';
@@ -230,5 +231,29 @@ class ApiService {
         .map((json) => Message.fromJson(json))
         .toList();
     return messages;
+  }
+
+  // Block endpoints
+
+  Future<List<BlockedUser>> getBlocks() async {
+    final response = await _dio.get('/blocks');
+    final blocks = (response.data['blocked'] as List)
+        .map((json) => BlockedUser.fromJson(json))
+        .toList();
+    return blocks;
+  }
+
+  Future<BlockedUser> blockUser(String userId) async {
+    final response = await _dio.post('/blocks/$userId');
+    return BlockedUser.fromJson(response.data);
+  }
+
+  Future<void> unblockUser(String userId) async {
+    await _dio.delete('/blocks/$userId');
+  }
+
+  Future<bool> isBlocked(String userId) async {
+    final response = await _dio.get('/blocks/$userId');
+    return response.data['blocked'] as bool;
   }
 }

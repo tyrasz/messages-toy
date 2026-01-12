@@ -48,6 +48,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
   StreamSubscription? _messageSubscription;
   StreamSubscription? _typingSubscription;
   StreamSubscription? _ackSubscription;
+  StreamSubscription? _messageEditedSubscription;
+  StreamSubscription? _messageDeletedSubscription;
 
   ChatNotifier(
     this._apiService,
@@ -61,6 +63,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
     _messageSubscription = _webSocketService.messageStream.listen(_handleIncomingMessage);
     _typingSubscription = _webSocketService.typingStream.listen(_handleTyping);
     _ackSubscription = _webSocketService.ackStream.listen(_handleAck);
+    _messageEditedSubscription = _webSocketService.messageEditedStream.listen(_handleMessageEdited);
+    _messageDeletedSubscription = _webSocketService.messageDeletedStream.listen(_handleMessageDeleted);
   }
 
   void _handleIncomingMessage(Message message) {
@@ -112,6 +116,50 @@ class ChatNotifier extends StateNotifier<ChatState> {
         newMessages[entry.key] = entry.value.map((msg) {
           if (msg.id == messageId) {
             return msg.copyWith(status: Message._parseStatus(status));
+          }
+          return msg;
+        }).toList();
+      }
+
+      state = state.copyWith(messages: newMessages);
+    }
+  }
+
+  void _handleMessageEdited(Map<String, dynamic> data) {
+    final messageId = data['message_id'] as String?;
+    final content = data['content'] as String?;
+    final editedAtStr = data['edited_at'] as String?;
+
+    if (messageId != null) {
+      final editedAt = editedAtStr != null ? DateTime.parse(editedAtStr) : DateTime.now();
+      final newMessages = <String, List<Message>>{};
+
+      for (final entry in state.messages.entries) {
+        newMessages[entry.key] = entry.value.map((msg) {
+          if (msg.id == messageId) {
+            return msg.copyWith(
+              content: content ?? msg.content,
+              editedAt: editedAt,
+            );
+          }
+          return msg;
+        }).toList();
+      }
+
+      state = state.copyWith(messages: newMessages);
+    }
+  }
+
+  void _handleMessageDeleted(Map<String, dynamic> data) {
+    final messageId = data['message_id'] as String?;
+
+    if (messageId != null) {
+      final newMessages = <String, List<Message>>{};
+
+      for (final entry in state.messages.entries) {
+        newMessages[entry.key] = entry.value.map((msg) {
+          if (msg.id == messageId) {
+            return msg.copyWith(isDeleted: true);
           }
           return msg;
         }).toList();
@@ -202,11 +250,24 @@ class ChatNotifier extends StateNotifier<ChatState> {
     return state.typingStatus[userId] ?? false;
   }
 
+  void editMessage(String messageId, String newContent) {
+    _webSocketService.sendMessageEdit(messageId: messageId, content: newContent);
+  }
+
+  void deleteMessage(String messageId, {bool forEveryone = false}) {
+    _webSocketService.sendMessageDelete(
+      messageId: messageId,
+      deleteFor: forEveryone ? 'everyone' : 'me',
+    );
+  }
+
   @override
   void dispose() {
     _messageSubscription?.cancel();
     _typingSubscription?.cancel();
     _ackSubscription?.cancel();
+    _messageEditedSubscription?.cancel();
+    _messageDeletedSubscription?.cancel();
     super.dispose();
   }
 }
