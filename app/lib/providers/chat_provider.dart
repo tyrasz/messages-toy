@@ -115,7 +115,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
       for (final entry in state.messages.entries) {
         newMessages[entry.key] = entry.value.map((msg) {
           if (msg.id == messageId) {
-            return msg.copyWith(status: Message._parseStatus(status));
+            return msg.copyWith(status: Message.parseStatus(status));
           }
           return msg;
         }).toList();

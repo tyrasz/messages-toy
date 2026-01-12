@@ -8,6 +8,7 @@ import (
 	"github.com/gofiber/contrib/websocket"
 	"messenger/internal/database"
 	"messenger/internal/models"
+	"messenger/internal/services"
 )
 
 const (
@@ -224,6 +225,16 @@ func (c *Client) handleDirectMessage(msg ChatMessage) {
 		}
 		ackBytes, _ := json.Marshal(ack)
 		c.Send <- ackBytes
+
+		// Send push notification to offline user
+		go services.PushMessageToOfflineUser(
+			database.DB,
+			msg.To,
+			c.UserID,
+			msg.Content,
+			false,
+			msg.To, // conversationID for DM is the other user's ID
+		)
 	}
 }
 
@@ -293,6 +304,23 @@ func (c *Client) handleGroupMessage(msg ChatMessage) {
 	}
 	ackBytes, _ := json.Marshal(ack)
 	c.Send <- ackBytes
+
+	// Send push notifications to offline group members
+	offlineMembers := c.Hub.GetOfflineGroupMemberIDs(msg.GroupID, c.UserID)
+	if len(offlineMembers) > 0 {
+		go func() {
+			for _, memberID := range offlineMembers {
+				services.PushMessageToOfflineUser(
+					database.DB,
+					memberID,
+					c.UserID,
+					msg.Content,
+					true,
+					msg.GroupID,
+				)
+			}
+		}()
+	}
 }
 
 func (c *Client) handleTypingMessage(data []byte) {

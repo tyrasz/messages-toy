@@ -28,6 +28,7 @@ func main() {
 		&models.Group{},
 		&models.GroupMember{},
 		&models.Block{},
+		&models.DeviceToken{},
 	)
 
 	// Create WebSocket hub

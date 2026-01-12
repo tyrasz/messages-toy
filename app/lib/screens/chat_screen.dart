@@ -2,11 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import '../models/user.dart';
 import '../models/message.dart';
 import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/blocks_provider.dart';
+import '../widgets/media_bubbles.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final User user;
@@ -117,30 +119,150 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
+  void _showAttachmentMenu() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.purple[100],
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.photo, color: Colors.purple[600]),
+              ),
+              title: const Text('Photo'),
+              subtitle: const Text('Send an image from gallery'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickAndSendImage();
+              },
+            ),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.red[100],
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.videocam, color: Colors.red[600]),
+              ),
+              title: const Text('Video'),
+              subtitle: const Text('Send a video'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickAndSendVideo();
+              },
+            ),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.blue[100],
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.insert_drive_file, color: Colors.blue[600]),
+              ),
+              title: const Text('Document'),
+              subtitle: const Text('Send PDF, DOC, or other files'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickAndSendDocument();
+              },
+            ),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.orange[100],
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.mic, color: Colors.orange[600]),
+              ),
+              title: const Text('Audio'),
+              subtitle: const Text('Send an audio file'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickAndSendAudio();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _pickAndSendImage() async {
     final picker = ImagePicker();
     final image = await picker.pickImage(source: ImageSource.gallery);
 
     if (image != null) {
-      // Upload image first
-      final apiService = ref.read(apiServiceProvider);
-      try {
-        final result = await apiService.uploadMedia(image.path);
-        final mediaId = result['id'] as String;
+      await _uploadAndSendMedia(image.path, 'image');
+    }
+  }
 
-        // Wait for moderation (in a real app, you'd poll or use WebSocket)
-        // For now, we'll just send with the media ID
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Image uploading...')),
-        );
+  Future<void> _pickAndSendVideo() async {
+    final picker = ImagePicker();
+    final video = await picker.pickVideo(source: ImageSource.gallery);
 
-        // In production, you'd wait for the media to be approved
-        // For now, just show a message
-      } catch (e) {
+    if (video != null) {
+      await _uploadAndSendMedia(video.path, 'video');
+    }
+  }
+
+  Future<void> _pickAndSendDocument() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt'],
+    );
+
+    if (result != null && result.files.single.path != null) {
+      await _uploadAndSendMedia(result.files.single.path!, 'document');
+    }
+  }
+
+  Future<void> _pickAndSendAudio() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.audio,
+    );
+
+    if (result != null && result.files.single.path != null) {
+      await _uploadAndSendMedia(result.files.single.path!, 'audio');
+    }
+  }
+
+  Future<void> _uploadAndSendMedia(String filePath, String mediaType) async {
+    final apiService = ref.read(apiServiceProvider);
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Uploading $mediaType...')),
+      );
+
+      final result = await apiService.uploadMedia(filePath);
+      final mediaId = result['id'] as String;
+      final status = result['status'] as String?;
+
+      if (status == 'pending') {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to upload: $e')),
+          const SnackBar(content: Text('Media uploaded, pending moderation...')),
         );
       }
+
+      // Send message with media ID
+      ref.read(chatProvider.notifier).sendMessage(
+            widget.user.id,
+            mediaId: mediaId,
+            replyToId: _replyingTo?.id,
+          );
+      setState(() => _replyingTo = null);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to upload: $e')),
+      );
     }
   }
 
@@ -429,8 +551,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 child: Row(
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.add_photo_alternate_outlined),
-                      onPressed: _pickAndSendImage,
+                      icon: const Icon(Icons.attach_file),
+                      onPressed: _showAttachmentMenu,
                     ),
                     Expanded(
                       child: TextField(
@@ -654,13 +776,22 @@ class _MessageBubble extends StatelessWidget {
                   fontStyle: FontStyle.italic,
                 ),
               )
-            else if (message.content != null)
-              Text(
-                message.content!,
-                style: TextStyle(
-                  color: isMe ? Colors.white : Colors.black87,
+            else ...[
+              // Media content
+              if (message.hasMedia) ...[
+                _buildMediaContent(context),
+                if (message.content != null && message.content!.isNotEmpty)
+                  const SizedBox(height: 8),
+              ],
+              // Text content
+              if (message.content != null && message.content!.isNotEmpty)
+                Text(
+                  message.content!,
+                  style: TextStyle(
+                    color: isMe ? Colors.white : Colors.black87,
+                  ),
                 ),
-              ),
+            ],
             const SizedBox(height: 4),
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -715,6 +846,25 @@ class _MessageBubble extends StatelessWidget {
         return Icons.done_all;
       case MessageStatus.read:
         return Icons.done_all;
+    }
+  }
+
+  Widget _buildMediaContent(BuildContext context) {
+    switch (message.mediaType) {
+      case MediaType.image:
+        return ImageMessageBubble(message: message, isMe: isMe);
+      case MediaType.video:
+        return VideoMessageBubble(message: message, isMe: isMe);
+      case MediaType.audio:
+        return AudioMessageBubble(message: message, isMe: isMe);
+      case MediaType.document:
+        return DocumentMessageBubble(message: message, isMe: isMe);
+      case MediaType.none:
+        // Fallback for media without type info
+        if (message.mediaUrl != null) {
+          return ImageMessageBubble(message: message, isMe: isMe);
+        }
+        return const SizedBox.shrink();
     }
   }
 }

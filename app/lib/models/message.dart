@@ -104,7 +104,7 @@ class Message {
       mediaWidth: media?['width'] as int?,
       mediaHeight: media?['height'] as int?,
       pageCount: media?['page_count'] as int?,
-      status: _parseStatus(json['status'] as String?),
+      status: parseStatus(json['status'] as String?),
       editedAt: json['edited_at'] != null
           ? DateTime.parse(json['edited_at'] as String)
           : null,
@@ -115,7 +115,7 @@ class Message {
     );
   }
 
-  static MessageStatus _parseStatus(String? status) {
+  static MessageStatus parseStatus(String? status) {
     switch (status) {
       case 'delivered':
         return MessageStatus.delivered;

@@ -124,6 +124,25 @@ func (h *Hub) GetGroupMemberIDs(groupID string) []string {
 	return ids
 }
 
+// GetOfflineGroupMemberIDs returns IDs of group members who are not currently connected
+func (h *Hub) GetOfflineGroupMemberIDs(groupID string, excludeUserID string) []string {
+	memberIDs := h.GetGroupMemberIDs(groupID)
+
+	h.mutex.RLock()
+	defer h.mutex.RUnlock()
+
+	var offlineIDs []string
+	for _, id := range memberIDs {
+		if id == excludeUserID {
+			continue
+		}
+		if _, online := h.clients[id]; !online {
+			offlineIDs = append(offlineIDs, id)
+		}
+	}
+	return offlineIDs
+}
+
 func (h *Hub) broadcastPresence(userID string, online bool) {
 	// Get user's contacts
 	var contacts []models.Contact
