@@ -157,6 +157,7 @@ func (c *Client) handleDirectMessage(msg ChatMessage) {
 		RecipientID: &msg.To,
 		Content:     msg.Content,
 		MediaID:     msg.MediaID,
+		ReplyToID:   msg.ReplyToID,
 		Status:      models.MessageStatusSent,
 	}
 
@@ -173,7 +174,20 @@ func (c *Client) handleDirectMessage(msg ChatMessage) {
 		To:        msg.To,
 		Content:   msg.Content,
 		MediaID:   msg.MediaID,
+		ReplyToID: msg.ReplyToID,
 		CreatedAt: message.CreatedAt.Format(time.RFC3339),
+	}
+
+	// Include reply preview if replying to a message
+	if msg.ReplyToID != nil {
+		var replyMsg models.Message
+		if err := database.DB.First(&replyMsg, "id = ?", *msg.ReplyToID).Error; err == nil {
+			outMsg.ReplyTo = &ReplyPreview{
+				ID:       replyMsg.ID,
+				SenderID: replyMsg.SenderID,
+				Content:  replyMsg.Content,
+			}
+		}
 	}
 
 	msgBytes, _ := json.Marshal(outMsg)
@@ -213,11 +227,12 @@ func (c *Client) handleGroupMessage(msg ChatMessage) {
 
 	// Save message to database
 	message := models.Message{
-		SenderID: c.UserID,
-		GroupID:  &msg.GroupID,
-		Content:  msg.Content,
-		MediaID:  msg.MediaID,
-		Status:   models.MessageStatusSent,
+		SenderID:  c.UserID,
+		GroupID:   &msg.GroupID,
+		Content:   msg.Content,
+		MediaID:   msg.MediaID,
+		ReplyToID: msg.ReplyToID,
+		Status:    models.MessageStatusSent,
 	}
 
 	if err := database.DB.Create(&message).Error; err != nil {
@@ -233,7 +248,20 @@ func (c *Client) handleGroupMessage(msg ChatMessage) {
 		GroupID:   msg.GroupID,
 		Content:   msg.Content,
 		MediaID:   msg.MediaID,
+		ReplyToID: msg.ReplyToID,
 		CreatedAt: message.CreatedAt.Format(time.RFC3339),
+	}
+
+	// Include reply preview if replying to a message
+	if msg.ReplyToID != nil {
+		var replyMsg models.Message
+		if err := database.DB.First(&replyMsg, "id = ?", *msg.ReplyToID).Error; err == nil {
+			outMsg.ReplyTo = &ReplyPreview{
+				ID:       replyMsg.ID,
+				SenderID: replyMsg.SenderID,
+				Content:  replyMsg.Content,
+			}
+		}
 	}
 
 	msgBytes, _ := json.Marshal(outMsg)

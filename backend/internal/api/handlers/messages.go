@@ -30,6 +30,7 @@ func (h *MessagesHandler) GetHistory(c *fiber.Ctx) error {
 	var messages []models.Message
 	err := database.DB.
 		Preload("Media").
+		Preload("ReplyTo").
 		Where(
 			"group_id IS NULL AND ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))",
 			userID, otherUserID, otherUserID, userID,

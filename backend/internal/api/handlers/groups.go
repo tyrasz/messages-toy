@@ -386,6 +386,7 @@ func (h *GroupsHandler) GetMessages(c *fiber.Ctx) error {
 	// Get messages
 	var messages []models.Message
 	database.DB.Preload("Media").
+		Preload("ReplyTo").
 		Where("group_id = ?", groupID).
 		Order("created_at DESC").
 		Limit(100).

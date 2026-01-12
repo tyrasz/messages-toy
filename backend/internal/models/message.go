@@ -20,16 +20,18 @@ type Message struct {
 	SenderID    string        `gorm:"not null;index" json:"sender_id"`
 	RecipientID *string       `gorm:"index" json:"recipient_id,omitempty"` // For DMs
 	GroupID     *string       `gorm:"index" json:"group_id,omitempty"`     // For group messages
+	ReplyToID   *string       `gorm:"index" json:"reply_to_id,omitempty"`  // For replies
 	Content     string        `json:"content,omitempty"`
 	MediaID     *string       `json:"media_id,omitempty"`
 	Status      MessageStatus `gorm:"default:sent" json:"status"`
 	CreatedAt   time.Time     `json:"created_at"`
 	UpdatedAt   time.Time     `json:"updated_at"`
 
-	Sender    User   `gorm:"foreignKey:SenderID" json:"-"`
-	Recipient *User  `gorm:"foreignKey:RecipientID" json:"-"`
-	Group     *Group `gorm:"foreignKey:GroupID" json:"-"`
-	Media     *Media `gorm:"foreignKey:MediaID" json:"media,omitempty"`
+	Sender    User     `gorm:"foreignKey:SenderID" json:"-"`
+	Recipient *User    `gorm:"foreignKey:RecipientID" json:"-"`
+	Group     *Group   `gorm:"foreignKey:GroupID" json:"-"`
+	Media     *Media   `gorm:"foreignKey:MediaID" json:"media,omitempty"`
+	ReplyTo   *Message `gorm:"foreignKey:ReplyToID" json:"reply_to,omitempty"`
 }
 
 func (m *Message) IsGroupMessage() bool {

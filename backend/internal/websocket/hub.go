@@ -156,12 +156,21 @@ type BaseMessage struct {
 type ChatMessage struct {
 	Type      string  `json:"type"`
 	ID        string  `json:"id,omitempty"`
-	To        string  `json:"to,omitempty"`         // For DMs: recipient user ID
-	GroupID   string  `json:"group_id,omitempty"`   // For groups: group ID
-	From      string  `json:"from,omitempty"`       // Sender ID (for incoming messages)
+	To        string  `json:"to,omitempty"`           // For DMs: recipient user ID
+	GroupID   string  `json:"group_id,omitempty"`     // For groups: group ID
+	From      string  `json:"from,omitempty"`         // Sender ID (for incoming messages)
 	Content   string  `json:"content,omitempty"`
 	MediaID   *string `json:"media_id,omitempty"`
+	ReplyToID *string `json:"reply_to_id,omitempty"`  // ID of message being replied to
+	ReplyTo   *ReplyPreview `json:"reply_to,omitempty"` // Preview of replied message
 	CreatedAt string  `json:"created_at,omitempty"`
+}
+
+// ReplyPreview contains a summary of the message being replied to
+type ReplyPreview struct {
+	ID       string `json:"id"`
+	SenderID string `json:"sender_id"`
+	Content  string `json:"content,omitempty"`
 }
 
 type TypingMessage struct {

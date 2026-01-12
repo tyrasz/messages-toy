@@ -149,8 +149,22 @@ class ChatNotifier extends StateNotifier<ChatState> {
     }
   }
 
-  void sendMessage(String toUserId, {String? content, String? mediaId}) {
+  void sendMessage(String toUserId, {String? content, String? mediaId, String? replyToId}) {
     if (content == null && mediaId == null) return;
+
+    // Find the message being replied to for the preview
+    ReplyPreview? replyTo;
+    if (replyToId != null) {
+      final currentMessages = state.messages[toUserId] ?? [];
+      final replyMessage = currentMessages.where((m) => m.id == replyToId).firstOrNull;
+      if (replyMessage != null) {
+        replyTo = ReplyPreview(
+          id: replyMessage.id,
+          senderId: replyMessage.senderId,
+          content: replyMessage.content,
+        );
+      }
+    }
 
     // Create optimistic message
     final message = Message(
@@ -159,6 +173,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
       recipientId: toUserId,
       content: content,
       mediaId: mediaId,
+      replyToId: replyToId,
+      replyTo: replyTo,
       status: MessageStatus.sent,
       createdAt: DateTime.now(),
     );
@@ -174,6 +190,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
       to: toUserId,
       content: content,
       mediaId: mediaId,
+      replyToId: replyToId,
     );
   }
 

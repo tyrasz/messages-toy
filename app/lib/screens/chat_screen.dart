@@ -21,6 +21,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _scrollController = ScrollController();
   Timer? _typingTimer;
   bool _isTyping = false;
+  Message? _replyingTo;
 
   @override
   void initState() {
@@ -64,10 +65,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     ref.read(chatProvider.notifier).sendMessage(
           widget.user.id,
           content: content,
+          replyToId: _replyingTo?.id,
         );
 
     _messageController.clear();
     _isTyping = false;
+    setState(() => _replyingTo = null);
+  }
+
+  void _onReply(Message message) {
+    setState(() => _replyingTo = message);
+  }
+
+  void _cancelReply() {
+    setState(() => _replyingTo = null);
   }
 
   Future<void> _pickAndSendImage() async {
@@ -174,9 +185,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     itemBuilder: (context, index) {
                       final message = messages[index];
                       final isMe = message.senderId == authState.user?.id;
-                      return _MessageBubble(
+                      return _SwipeableMessageBubble(
                         message: message,
                         isMe: isMe,
+                        currentUserId: authState.user?.id,
+                        onReply: () => _onReply(message),
                       );
                     },
                   ),
@@ -199,6 +212,59 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ),
                   const SizedBox(width: 8),
                   const _TypingIndicator(),
+                ],
+              ),
+            ),
+
+          // Reply preview
+          if (_replyingTo != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                border: Border(
+                  left: BorderSide(
+                    color: Theme.of(context).primaryColor,
+                    width: 4,
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _replyingTo!.senderId == authState.user?.id
+                              ? 'Replying to yourself'
+                              : 'Replying to ${widget.user.displayNameOrUsername}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).primaryColor,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _replyingTo!.content ?? '[Media]',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 20),
+                    onPressed: _cancelReply,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
                 ],
               ),
             ),
@@ -260,13 +326,57 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 }
 
+class _SwipeableMessageBubble extends StatelessWidget {
+  final Message message;
+  final bool isMe;
+  final String? currentUserId;
+  final VoidCallback onReply;
+
+  const _SwipeableMessageBubble({
+    required this.message,
+    required this.isMe,
+    required this.currentUserId,
+    required this.onReply,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Dismissible(
+      key: Key(message.id),
+      direction: isMe ? DismissDirection.endToStart : DismissDirection.startToEnd,
+      confirmDismiss: (direction) async {
+        onReply();
+        return false; // Don't actually dismiss
+      },
+      background: Container(
+        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+        padding: EdgeInsets.only(
+          left: isMe ? 0 : 20,
+          right: isMe ? 20 : 0,
+        ),
+        child: Icon(
+          Icons.reply,
+          color: Colors.grey[400],
+        ),
+      ),
+      child: _MessageBubble(
+        message: message,
+        isMe: isMe,
+        currentUserId: currentUserId,
+      ),
+    );
+  }
+}
+
 class _MessageBubble extends StatelessWidget {
   final Message message;
   final bool isMe;
+  final String? currentUserId;
 
   const _MessageBubble({
     required this.message,
     required this.isMe,
+    this.currentUserId,
   });
 
   @override
@@ -291,8 +401,51 @@ class _MessageBubble extends StatelessWidget {
           ),
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Reply preview
+            if (message.replyTo != null) ...[
+              Container(
+                padding: const EdgeInsets.all(8),
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: isMe
+                      ? Colors.white.withOpacity(0.2)
+                      : Colors.grey[300],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border(
+                    left: BorderSide(
+                      color: isMe ? Colors.white70 : Theme.of(context).primaryColor,
+                      width: 3,
+                    ),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      message.replyTo!.senderId == currentUserId ? 'You' : 'Them',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: isMe ? Colors.white70 : Theme.of(context).primaryColor,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      message.replyTo!.content ?? '[Media]',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isMe ? Colors.white60 : Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            // Message content
             if (message.content != null)
               Text(
                 message.content!,
