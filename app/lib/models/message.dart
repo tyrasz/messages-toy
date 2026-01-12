@@ -3,7 +3,8 @@ enum MessageStatus { sent, delivered, read }
 class Message {
   final String id;
   final String senderId;
-  final String recipientId;
+  final String? recipientId; // For DMs
+  final String? groupId;     // For group messages
   final String? content;
   final String? mediaId;
   final String? mediaUrl;
@@ -13,7 +14,8 @@ class Message {
   Message({
     required this.id,
     required this.senderId,
-    required this.recipientId,
+    this.recipientId,
+    this.groupId,
     this.content,
     this.mediaId,
     this.mediaUrl,
@@ -24,8 +26,9 @@ class Message {
   factory Message.fromJson(Map<String, dynamic> json) {
     return Message(
       id: json['id'] as String,
-      senderId: json['sender_id'] as String,
-      recipientId: json['recipient_id'] ?? json['to'] as String,
+      senderId: json['sender_id'] ?? json['from'] as String,
+      recipientId: json['recipient_id'] as String? ?? json['to'] as String?,
+      groupId: json['group_id'] as String?,
       content: json['content'] as String?,
       mediaId: json['media_id'] as String?,
       mediaUrl: json['media']?['url'] as String?,
@@ -47,11 +50,14 @@ class Message {
     }
   }
 
+  bool get isGroupMessage => groupId != null && groupId!.isNotEmpty;
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,
       'sender_id': senderId,
-      'recipient_id': recipientId,
+      if (recipientId != null) 'recipient_id': recipientId,
+      if (groupId != null) 'group_id': groupId,
       'content': content,
       'media_id': mediaId,
       'status': status.name,
@@ -63,6 +69,7 @@ class Message {
     String? id,
     String? senderId,
     String? recipientId,
+    String? groupId,
     String? content,
     String? mediaId,
     String? mediaUrl,
@@ -73,6 +80,7 @@ class Message {
       id: id ?? this.id,
       senderId: senderId ?? this.senderId,
       recipientId: recipientId ?? this.recipientId,
+      groupId: groupId ?? this.groupId,
       content: content ?? this.content,
       mediaId: mediaId ?? this.mediaId,
       mediaUrl: mediaUrl ?? this.mediaUrl,

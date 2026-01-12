@@ -94,6 +94,36 @@ func (h *Hub) SendToUser(userID string, message []byte) bool {
 	return false
 }
 
+// SendToGroup sends a message to all online members of a group
+func (h *Hub) SendToGroup(groupID string, excludeUserID string, message []byte) int {
+	// Get group members
+	var members []models.GroupMember
+	database.DB.Where("group_id = ?", groupID).Find(&members)
+
+	sent := 0
+	for _, member := range members {
+		if member.UserID == excludeUserID {
+			continue
+		}
+		if h.SendToUser(member.UserID, message) {
+			sent++
+		}
+	}
+	return sent
+}
+
+// GetGroupMemberIDs returns all member IDs of a group
+func (h *Hub) GetGroupMemberIDs(groupID string) []string {
+	var members []models.GroupMember
+	database.DB.Where("group_id = ?", groupID).Find(&members)
+
+	ids := make([]string, len(members))
+	for i, m := range members {
+		ids[i] = m.UserID
+	}
+	return ids
+}
+
 func (h *Hub) broadcastPresence(userID string, online bool) {
 	// Get user's contacts
 	var contacts []models.Contact
@@ -126,7 +156,9 @@ type BaseMessage struct {
 type ChatMessage struct {
 	Type      string  `json:"type"`
 	ID        string  `json:"id,omitempty"`
-	To        string  `json:"to"`
+	To        string  `json:"to,omitempty"`         // For DMs: recipient user ID
+	GroupID   string  `json:"group_id,omitempty"`   // For groups: group ID
+	From      string  `json:"from,omitempty"`       // Sender ID (for incoming messages)
 	Content   string  `json:"content,omitempty"`
 	MediaID   *string `json:"media_id,omitempty"`
 	CreatedAt string  `json:"created_at,omitempty"`

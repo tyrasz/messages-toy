@@ -4,8 +4,11 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../providers/auth_provider.dart';
 import '../providers/contacts_provider.dart';
 import '../providers/chat_provider.dart';
+import '../providers/groups_provider.dart';
 import '../models/contact.dart';
 import 'chat_screen.dart';
+import 'group_chat_screen.dart';
+import 'create_group_screen.dart';
 
 class ContactsScreen extends ConsumerStatefulWidget {
   const ContactsScreen({super.key});
@@ -21,12 +24,13 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
 
     // Load data when screen opens
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(contactsProvider.notifier).loadContacts();
       ref.read(chatProvider.notifier).loadConversations();
+      ref.read(groupsProvider.notifier).loadGroups();
     });
   }
 
@@ -76,6 +80,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen>
     final authState = ref.watch(authProvider);
     final contactsState = ref.watch(contactsProvider);
     final chatState = ref.watch(chatProvider);
+    final groupsState = ref.watch(groupsProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -84,6 +89,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen>
           controller: _tabController,
           tabs: const [
             Tab(text: 'Chats'),
+            Tab(text: 'Groups'),
             Tab(text: 'Contacts'),
           ],
         ),
@@ -91,6 +97,17 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen>
           IconButton(
             icon: const Icon(Icons.person_add_outlined),
             onPressed: _showAddContactDialog,
+          ),
+          IconButton(
+            icon: const Icon(Icons.group_add_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const CreateGroupScreen(),
+                ),
+              );
+            },
           ),
           PopupMenuButton(
             itemBuilder: (context) => [
@@ -115,6 +132,9 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen>
         children: [
           // Chats tab
           _buildConversationsList(chatState),
+
+          // Groups tab
+          _buildGroupsList(groupsState),
 
           // Contacts tab
           _buildContactsList(contactsState),
@@ -211,6 +231,86 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen>
                 context,
                 MaterialPageRoute(
                   builder: (context) => ChatScreen(user: conversation.user),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildGroupsList(GroupsState groupsState) {
+    if (groupsState.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (groupsState.groups.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.group_outlined,
+              size: 64,
+              color: Colors.grey[400],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No groups yet',
+              style: TextStyle(color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Create a group to start chatting',
+              style: TextStyle(color: Colors.grey[500], fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const CreateGroupScreen(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.group_add),
+              label: const Text('Create Group'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: () => ref.read(groupsProvider.notifier).loadGroups(),
+      child: ListView.builder(
+        itemCount: groupsState.groups.length,
+        itemBuilder: (context, index) {
+          final group = groupsState.groups[index];
+          return ListTile(
+            leading: CircleAvatar(
+              backgroundColor: Theme.of(context).primaryColor,
+              child: Text(
+                group.name[0].toUpperCase(),
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+            title: Text(group.name),
+            subtitle: Text(
+              '${group.memberCount} members',
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontSize: 12,
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => GroupChatScreen(group: group),
                 ),
               );
             },

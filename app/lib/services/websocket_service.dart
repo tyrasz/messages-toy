@@ -123,7 +123,8 @@ class WebSocketService {
   }
 
   void sendMessage({
-    required String to,
+    String? to,        // For DMs
+    String? groupId,   // For group messages
     String? content,
     String? mediaId,
   }) {
@@ -132,9 +133,15 @@ class WebSocketService {
       return;
     }
 
+    if (to == null && groupId == null) {
+      print('Cannot send message: no recipient or group specified');
+      return;
+    }
+
     final message = {
       'type': 'message',
-      'to': to,
+      if (to != null) 'to': to,
+      if (groupId != null) 'group_id': groupId,
       if (content != null) 'content': content,
       if (mediaId != null) 'media_id': mediaId,
     };

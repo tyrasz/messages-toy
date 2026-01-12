@@ -24,6 +24,8 @@ func main() {
 		&models.Message{},
 		&models.Contact{},
 		&models.Media{},
+		&models.Group{},
+		&models.GroupMember{},
 	)
 
 	// Create WebSocket hub

@@ -116,8 +116,9 @@ func (c *Client) handleChatMessage(data []byte) {
 		return
 	}
 
-	if msg.To == "" {
-		c.sendError("Recipient is required")
+	// Must have either recipient (DM) or group_id (group message)
+	if msg.To == "" && msg.GroupID == "" {
+		c.sendError("Recipient or group_id is required")
 		return
 	}
 
@@ -139,10 +140,21 @@ func (c *Client) handleChatMessage(data []byte) {
 		}
 	}
 
+	// Handle group message
+	if msg.GroupID != "" {
+		c.handleGroupMessage(msg)
+		return
+	}
+
+	// Handle DM
+	c.handleDirectMessage(msg)
+}
+
+func (c *Client) handleDirectMessage(msg ChatMessage) {
 	// Save message to database
 	message := models.Message{
 		SenderID:    c.UserID,
-		RecipientID: msg.To,
+		RecipientID: &msg.To,
 		Content:     msg.Content,
 		MediaID:     msg.MediaID,
 		Status:      models.MessageStatusSent,
@@ -157,6 +169,7 @@ func (c *Client) handleChatMessage(data []byte) {
 	outMsg := ChatMessage{
 		Type:      "message",
 		ID:        message.ID,
+		From:      c.UserID,
 		To:        msg.To,
 		Content:   msg.Content,
 		MediaID:   msg.MediaID,
@@ -188,6 +201,60 @@ func (c *Client) handleChatMessage(data []byte) {
 		ackBytes, _ := json.Marshal(ack)
 		c.Send <- ackBytes
 	}
+}
+
+func (c *Client) handleGroupMessage(msg ChatMessage) {
+	// Check if user is a member of the group
+	var membership models.GroupMember
+	if err := database.DB.Where("group_id = ? AND user_id = ?", msg.GroupID, c.UserID).First(&membership).Error; err != nil {
+		c.sendError("You are not a member of this group")
+		return
+	}
+
+	// Save message to database
+	message := models.Message{
+		SenderID: c.UserID,
+		GroupID:  &msg.GroupID,
+		Content:  msg.Content,
+		MediaID:  msg.MediaID,
+		Status:   models.MessageStatusSent,
+	}
+
+	if err := database.DB.Create(&message).Error; err != nil {
+		c.sendError("Failed to save message")
+		return
+	}
+
+	// Prepare outgoing message
+	outMsg := ChatMessage{
+		Type:      "message",
+		ID:        message.ID,
+		From:      c.UserID,
+		GroupID:   msg.GroupID,
+		Content:   msg.Content,
+		MediaID:   msg.MediaID,
+		CreatedAt: message.CreatedAt.Format(time.RFC3339),
+	}
+
+	msgBytes, _ := json.Marshal(outMsg)
+
+	// Broadcast to all group members (except sender)
+	sentCount := c.Hub.SendToGroup(msg.GroupID, c.UserID, msgBytes)
+
+	// Send ack to sender
+	status := "sent"
+	if sentCount > 0 {
+		status = "delivered"
+		database.DB.Model(&message).Update("status", models.MessageStatusDelivered)
+	}
+
+	ack := AckMessage{
+		Type:      "ack",
+		MessageID: message.ID,
+		Status:    status,
+	}
+	ackBytes, _ := json.Marshal(ack)
+	c.Send <- ackBytes
 }
 
 func (c *Client) handleTypingMessage(data []byte) {

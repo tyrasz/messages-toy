@@ -4,6 +4,7 @@ import '../models/user.dart';
 import '../models/contact.dart';
 import '../models/message.dart';
 import '../models/conversation.dart';
+import '../models/group.dart';
 
 class ApiService {
   static const String baseUrl = 'http://localhost:8080/api';
@@ -177,5 +178,57 @@ class ApiService {
 
     final response = await _dio.post('/media/upload', data: formData);
     return response.data;
+  }
+
+  // Group endpoints
+
+  Future<List<Group>> getGroups() async {
+    final response = await _dio.get('/groups');
+    final groups = (response.data['groups'] as List)
+        .map((json) => Group.fromJson(json))
+        .toList();
+    return groups;
+  }
+
+  Future<Group> createGroup({
+    required String name,
+    String? description,
+    List<String>? memberIds,
+  }) async {
+    final response = await _dio.post('/groups', data: {
+      'name': name,
+      if (description != null) 'description': description,
+      if (memberIds != null) 'member_ids': memberIds,
+    });
+    return Group.fromJson(response.data);
+  }
+
+  Future<Group> getGroup(String groupId) async {
+    final response = await _dio.get('/groups/$groupId');
+    return Group.fromJson(response.data);
+  }
+
+  Future<void> addGroupMember(String groupId, String userId) async {
+    await _dio.post('/groups/$groupId/members', data: {
+      'user_id': userId,
+    });
+  }
+
+  Future<void> removeGroupMember(String groupId, String userId) async {
+    await _dio.delete('/groups/$groupId/members/$userId');
+  }
+
+  Future<void> leaveGroup(String groupId) async {
+    await _dio.post('/groups/$groupId/leave');
+  }
+
+  Future<List<Message>> getGroupMessages(String groupId, {int limit = 100}) async {
+    final response = await _dio.get('/groups/$groupId/messages', queryParameters: {
+      'limit': limit,
+    });
+    final messages = (response.data['messages'] as List)
+        .map((json) => Message.fromJson(json))
+        .toList();
+    return messages;
   }
 }

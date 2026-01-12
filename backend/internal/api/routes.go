@@ -41,6 +41,17 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	messages.Get("/conversations", messagesHandler.GetConversations)
 	messages.Get("/:userId", messagesHandler.GetHistory)
 
+	// Groups
+	groupsHandler := handlers.NewGroupsHandler(hub)
+	groups := protected.Group("/groups")
+	groups.Post("/", groupsHandler.Create)
+	groups.Get("/", groupsHandler.List)
+	groups.Get("/:id", groupsHandler.Get)
+	groups.Post("/:id/members", groupsHandler.AddMember)
+	groups.Delete("/:id/members/:userId", groupsHandler.RemoveMember)
+	groups.Post("/:id/leave", groupsHandler.Leave)
+	groups.Get("/:id/messages", groupsHandler.GetMessages)
+
 	// Media
 	mediaHandler := handlers.NewMediaHandler(hub)
 	media := protected.Group("/media")

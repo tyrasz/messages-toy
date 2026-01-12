@@ -18,7 +18,8 @@ const (
 type Message struct {
 	ID          string        `gorm:"primaryKey" json:"id"`
 	SenderID    string        `gorm:"not null;index" json:"sender_id"`
-	RecipientID string        `gorm:"not null;index" json:"recipient_id"`
+	RecipientID *string       `gorm:"index" json:"recipient_id,omitempty"` // For DMs
+	GroupID     *string       `gorm:"index" json:"group_id,omitempty"`     // For group messages
 	Content     string        `json:"content,omitempty"`
 	MediaID     *string       `json:"media_id,omitempty"`
 	Status      MessageStatus `gorm:"default:sent" json:"status"`
@@ -26,8 +27,13 @@ type Message struct {
 	UpdatedAt   time.Time     `json:"updated_at"`
 
 	Sender    User   `gorm:"foreignKey:SenderID" json:"-"`
-	Recipient User   `gorm:"foreignKey:RecipientID" json:"-"`
+	Recipient *User  `gorm:"foreignKey:RecipientID" json:"-"`
+	Group     *Group `gorm:"foreignKey:GroupID" json:"-"`
 	Media     *Media `gorm:"foreignKey:MediaID" json:"media,omitempty"`
+}
+
+func (m *Message) IsGroupMessage() bool {
+	return m.GroupID != nil && *m.GroupID != ""
 }
 
 func (m *Message) BeforeCreate(tx *gorm.DB) error {

@@ -31,7 +31,7 @@ func (h *MessagesHandler) GetHistory(c *fiber.Ctx) error {
 	err := database.DB.
 		Preload("Media").
 		Where(
-			"(sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?)",
+			"group_id IS NULL AND ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))",
 			userID, otherUserID, otherUserID, userID,
 		).
 		Order("created_at DESC").
@@ -60,7 +60,7 @@ func (h *MessagesHandler) GetHistory(c *fiber.Ctx) error {
 func (h *MessagesHandler) GetConversations(c *fiber.Ctx) error {
 	userID := middleware.GetUserID(c)
 
-	// Raw query to get conversations with latest message
+	// Raw query to get DM conversations with latest message (exclude group messages)
 	rows, err := database.DB.Raw(`
 		SELECT
 			CASE
@@ -69,7 +69,7 @@ func (h *MessagesHandler) GetConversations(c *fiber.Ctx) error {
 			END as other_user_id,
 			MAX(created_at) as last_message_time
 		FROM messages
-		WHERE sender_id = ? OR recipient_id = ?
+		WHERE group_id IS NULL AND (sender_id = ? OR recipient_id = ?)
 		GROUP BY other_user_id
 		ORDER BY last_message_time DESC
 	`, userID, userID, userID).Rows()
