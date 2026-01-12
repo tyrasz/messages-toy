@@ -7,6 +7,7 @@ import '../models/conversation.dart';
 import '../models/group.dart';
 import '../models/block.dart';
 import '../models/search_result.dart';
+import '../models/link_preview.dart';
 
 class ApiService {
   static const String baseUrl = 'http://localhost:8080/api';
@@ -268,5 +269,19 @@ class ApiService {
   Future<bool> isBlocked(String userId) async {
     final response = await _dio.get('/blocks/$userId');
     return response.data['blocked'] as bool;
+  }
+
+  // Link previews
+  Future<LinkPreview?> fetchLinkPreview(String url) async {
+    try {
+      final response = await _dio.post('/links/preview', data: {'url': url});
+      final previewData = response.data['preview'] as Map<String, dynamic>?;
+      if (previewData != null) {
+        return LinkPreview.fromJson(previewData);
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
   }
 }

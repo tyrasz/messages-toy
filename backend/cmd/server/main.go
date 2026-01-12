@@ -30,6 +30,7 @@ func main() {
 		&models.Block{},
 		&models.DeviceToken{},
 		&models.Reaction{},
+		&models.LinkPreview{},
 	)
 
 	// Create WebSocket hub

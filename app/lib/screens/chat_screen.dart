@@ -6,10 +6,12 @@ import 'package:file_picker/file_picker.dart';
 import '../models/user.dart';
 import '../models/message.dart';
 import '../models/reaction.dart';
+import '../models/link_preview.dart';
 import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/blocks_provider.dart';
 import '../widgets/media_bubbles.dart';
+import '../widgets/link_preview_widget.dart';
 import 'forward_message_screen.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -864,6 +866,12 @@ class _MessageBubble extends ConsumerWidget {
                   style: TextStyle(
                     color: isMe ? Colors.white : Colors.black87,
                   ),
+                ),
+              // Link preview
+              if (message.content != null && UrlExtractor.hasUrl(message.content!))
+                LinkPreviewWidget(
+                  url: UrlExtractor.getFirstUrl(message.content!)!,
+                  isMe: isMe,
                 ),
             ],
             const SizedBox(height: 4),

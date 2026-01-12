@@ -75,6 +75,12 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	notifications.Get("/tokens", notificationsHandler.GetTokens)
 	notifications.Post("/test", notificationsHandler.TestNotification)
 
+	// Link previews
+	linkPreviewHandler := handlers.NewLinkPreviewHandler()
+	links := protected.Group("/links")
+	links.Post("/preview", linkPreviewHandler.FetchPreview)
+	links.Get("/preview", linkPreviewHandler.GetPreview)
+
 	// Admin routes (for moderation review)
 	adminHandler := handlers.NewAdminHandler()
 	admin := protected.Group("/admin")
