@@ -296,6 +296,34 @@ class ChatNotifier extends StateNotifier<ChatState> {
     _webSocketService.removeReaction(messageId: messageId);
   }
 
+  void forwardMessage(Message originalMessage, String toUserId, String originalSenderName) {
+    // Create optimistic message
+    final message = Message(
+      id: _uuid.v4(),
+      senderId: _currentUserId,
+      recipientId: toUserId,
+      content: originalMessage.content,
+      mediaId: originalMessage.mediaId,
+      forwardedFrom: originalSenderName,
+      status: MessageStatus.sent,
+      createdAt: DateTime.now(),
+    );
+
+    // Add to local state immediately
+    final currentMessages = state.messages[toUserId] ?? [];
+    state = state.copyWith(
+      messages: {...state.messages, toUserId: [message, ...currentMessages]},
+    );
+
+    // Send via WebSocket
+    _webSocketService.sendMessage(
+      to: toUserId,
+      content: originalMessage.content,
+      mediaId: originalMessage.mediaId,
+      forwardedFrom: originalSenderName,
+    );
+  }
+
   @override
   void dispose() {
     _messageSubscription?.cancel();

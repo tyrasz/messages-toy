@@ -6,6 +6,7 @@ import '../models/message.dart';
 import '../models/conversation.dart';
 import '../models/group.dart';
 import '../models/block.dart';
+import '../models/search_result.dart';
 
 class ApiService {
   static const String baseUrl = 'http://localhost:8080/api';
@@ -168,6 +169,18 @@ class ApiService {
         .map((json) => Message.fromJson(json))
         .toList();
     return messages;
+  }
+
+  Future<List<SearchResult>> searchMessages(String query, {int limit = 20, int offset = 0}) async {
+    final response = await _dio.get('/messages/search', queryParameters: {
+      'q': query,
+      'limit': limit,
+      'offset': offset,
+    });
+    final results = (response.data['results'] as List)
+        .map((json) => SearchResult.fromJson(json))
+        .toList();
+    return results;
   }
 
   // Media endpoints

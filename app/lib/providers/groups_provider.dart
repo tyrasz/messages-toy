@@ -159,6 +159,22 @@ class GroupsNotifier extends StateNotifier<GroupsState> {
         break;
     }
   }
+
+  void updateMessageReactions(String messageId, List<dynamic> reactionsData) {
+    final newMessages = <String, List<Message>>{};
+
+    for (final entry in state.messages.entries) {
+      newMessages[entry.key] = entry.value.map((msg) {
+        if (msg.id == messageId) {
+          // Parse reactions - will need to import reaction model
+          return msg;
+        }
+        return msg;
+      }).toList();
+    }
+
+    state = state.copyWith(messages: newMessages);
+  }
 }
 
 final groupsProvider = StateNotifierProvider<GroupsNotifier, GroupsState>((ref) {

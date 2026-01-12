@@ -16,18 +16,19 @@ const (
 )
 
 type Message struct {
-	ID          string        `gorm:"primaryKey" json:"id"`
-	SenderID    string        `gorm:"not null;index" json:"sender_id"`
-	RecipientID *string       `gorm:"index" json:"recipient_id,omitempty"` // For DMs
-	GroupID     *string       `gorm:"index" json:"group_id,omitempty"`     // For group messages
-	ReplyToID   *string       `gorm:"index" json:"reply_to_id,omitempty"`  // For replies
-	Content     string        `json:"content,omitempty"`
-	MediaID     *string       `json:"media_id,omitempty"`
-	Status      MessageStatus `gorm:"default:sent" json:"status"`
-	EditedAt    *time.Time    `json:"edited_at,omitempty"`              // When message was edited
-	DeletedAt   *time.Time    `json:"deleted_at,omitempty"`             // Soft delete for "delete for everyone"
-	CreatedAt   time.Time     `json:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
+	ID            string        `gorm:"primaryKey" json:"id"`
+	SenderID      string        `gorm:"not null;index" json:"sender_id"`
+	RecipientID   *string       `gorm:"index" json:"recipient_id,omitempty"` // For DMs
+	GroupID       *string       `gorm:"index" json:"group_id,omitempty"`     // For group messages
+	ReplyToID     *string       `gorm:"index" json:"reply_to_id,omitempty"`  // For replies
+	Content       string        `json:"content,omitempty"`
+	MediaID       *string       `json:"media_id,omitempty"`
+	ForwardedFrom *string       `json:"forwarded_from,omitempty"`            // Original sender name if forwarded
+	Status        MessageStatus `gorm:"default:sent" json:"status"`
+	EditedAt      *time.Time    `json:"edited_at,omitempty"`                 // When message was edited
+	DeletedAt     *time.Time    `json:"deleted_at,omitempty"`                // Soft delete for "delete for everyone"
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
 
 	Sender    User     `gorm:"foreignKey:SenderID" json:"-"`
 	Recipient *User    `gorm:"foreignKey:RecipientID" json:"-"`

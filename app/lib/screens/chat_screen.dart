@@ -10,6 +10,7 @@ import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/blocks_provider.dart';
 import '../widgets/media_bubbles.dart';
+import 'forward_message_screen.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final User user;
@@ -425,6 +426,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         message: message,
                         isMe: isMe,
                         currentUserId: authState.user?.id,
+                        otherUserName: widget.user.displayNameOrUsername,
                         onReply: () => _onReply(message),
                         onEdit: _onEdit,
                       );
@@ -596,6 +598,7 @@ class _SwipeableMessageBubble extends ConsumerWidget {
   final Message message;
   final bool isMe;
   final String? currentUserId;
+  final String otherUserName;
   final VoidCallback onReply;
   final void Function(Message) onEdit;
 
@@ -603,6 +606,7 @@ class _SwipeableMessageBubble extends ConsumerWidget {
     required this.message,
     required this.isMe,
     required this.currentUserId,
+    required this.otherUserName,
     required this.onReply,
     required this.onEdit,
   });
@@ -646,6 +650,22 @@ class _SwipeableMessageBubble extends ConsumerWidget {
               onTap: () {
                 Navigator.pop(context);
                 onReply();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.forward),
+              title: const Text('Forward'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ForwardMessageScreen(
+                      message: message,
+                      originalSenderName: isMe ? 'You' : otherUserName,
+                    ),
+                  ),
+                );
               },
             ),
             if (isMe && message.content != null) ...[
@@ -756,6 +776,29 @@ class _MessageBubble extends ConsumerWidget {
             child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Forwarded indicator
+            if (message.isForwarded) ...[
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.forward,
+                    size: 12,
+                    color: isMe ? Colors.white60 : Colors.grey[500],
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Forwarded from ${message.forwardedFrom}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color: isMe ? Colors.white60 : Colors.grey[500],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+            ],
             // Reply preview
             if (message.replyTo != null) ...[
               Container(

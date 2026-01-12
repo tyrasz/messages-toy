@@ -46,6 +46,7 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	messagesHandler := handlers.NewMessagesHandler()
 	messages := protected.Group("/messages")
 	messages.Get("/conversations", messagesHandler.GetConversations)
+	messages.Get("/search", messagesHandler.Search)
 	messages.Get("/:userId", messagesHandler.GetHistory)
 
 	// Groups

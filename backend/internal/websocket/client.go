@@ -166,12 +166,13 @@ func (c *Client) handleDirectMessage(msg ChatMessage) {
 
 	// Save message to database
 	message := models.Message{
-		SenderID:    c.UserID,
-		RecipientID: &msg.To,
-		Content:     msg.Content,
-		MediaID:     msg.MediaID,
-		ReplyToID:   msg.ReplyToID,
-		Status:      models.MessageStatusSent,
+		SenderID:      c.UserID,
+		RecipientID:   &msg.To,
+		Content:       msg.Content,
+		MediaID:       msg.MediaID,
+		ReplyToID:     msg.ReplyToID,
+		ForwardedFrom: msg.ForwardedFrom,
+		Status:        models.MessageStatusSent,
 	}
 
 	if err := database.DB.Create(&message).Error; err != nil {
@@ -181,14 +182,15 @@ func (c *Client) handleDirectMessage(msg ChatMessage) {
 
 	// Prepare outgoing message
 	outMsg := ChatMessage{
-		Type:      "message",
-		ID:        message.ID,
-		From:      c.UserID,
-		To:        msg.To,
-		Content:   msg.Content,
-		MediaID:   msg.MediaID,
-		ReplyToID: msg.ReplyToID,
-		CreatedAt: message.CreatedAt.Format(time.RFC3339),
+		Type:          "message",
+		ID:            message.ID,
+		From:          c.UserID,
+		To:            msg.To,
+		Content:       msg.Content,
+		MediaID:       msg.MediaID,
+		ReplyToID:     msg.ReplyToID,
+		ForwardedFrom: msg.ForwardedFrom,
+		CreatedAt:     message.CreatedAt.Format(time.RFC3339),
 	}
 
 	// Include reply preview if replying to a message
@@ -250,12 +252,13 @@ func (c *Client) handleGroupMessage(msg ChatMessage) {
 
 	// Save message to database
 	message := models.Message{
-		SenderID:  c.UserID,
-		GroupID:   &msg.GroupID,
-		Content:   msg.Content,
-		MediaID:   msg.MediaID,
-		ReplyToID: msg.ReplyToID,
-		Status:    models.MessageStatusSent,
+		SenderID:      c.UserID,
+		GroupID:       &msg.GroupID,
+		Content:       msg.Content,
+		MediaID:       msg.MediaID,
+		ReplyToID:     msg.ReplyToID,
+		ForwardedFrom: msg.ForwardedFrom,
+		Status:        models.MessageStatusSent,
 	}
 
 	if err := database.DB.Create(&message).Error; err != nil {
@@ -265,14 +268,15 @@ func (c *Client) handleGroupMessage(msg ChatMessage) {
 
 	// Prepare outgoing message
 	outMsg := ChatMessage{
-		Type:      "message",
-		ID:        message.ID,
-		From:      c.UserID,
-		GroupID:   msg.GroupID,
-		Content:   msg.Content,
-		MediaID:   msg.MediaID,
-		ReplyToID: msg.ReplyToID,
-		CreatedAt: message.CreatedAt.Format(time.RFC3339),
+		Type:          "message",
+		ID:            message.ID,
+		From:          c.UserID,
+		GroupID:       msg.GroupID,
+		Content:       msg.Content,
+		MediaID:       msg.MediaID,
+		ReplyToID:     msg.ReplyToID,
+		ForwardedFrom: msg.ForwardedFrom,
+		CreatedAt:     message.CreatedAt.Format(time.RFC3339),
 	}
 
 	// Include reply preview if replying to a message

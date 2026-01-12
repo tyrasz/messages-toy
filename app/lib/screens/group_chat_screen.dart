@@ -5,6 +5,7 @@ import '../models/group.dart';
 import '../models/message.dart';
 import '../providers/auth_provider.dart';
 import '../providers/groups_provider.dart';
+import 'forward_message_screen.dart';
 
 class GroupChatScreen extends ConsumerStatefulWidget {
   final Group group;
@@ -166,6 +167,7 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
                         isMe: isMe,
                         showSender: !isMe,
                         currentUserId: authState.user?.id,
+                        groupName: widget.group.name,
                         onReply: () => _onReply(message),
                       );
                     },
@@ -282,6 +284,7 @@ class _SwipeableGroupMessageBubble extends StatelessWidget {
   final bool isMe;
   final bool showSender;
   final String? currentUserId;
+  final String groupName;
   final VoidCallback onReply;
 
   const _SwipeableGroupMessageBubble({
@@ -289,34 +292,77 @@ class _SwipeableGroupMessageBubble extends StatelessWidget {
     required this.isMe,
     required this.showSender,
     required this.currentUserId,
+    required this.groupName,
     required this.onReply,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    return Dismissible(
-      key: Key(message.id),
-      direction: isMe ? DismissDirection.endToStart : DismissDirection.startToEnd,
-      confirmDismiss: (direction) async {
-        onReply();
-        return false; // Don't actually dismiss
-      },
-      background: Container(
-        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-        padding: EdgeInsets.only(
-          left: isMe ? 0 : 20,
-          right: isMe ? 20 : 0,
-        ),
-        child: Icon(
-          Icons.reply,
-          color: Colors.grey[400],
+  void _showMessageOptions(BuildContext context) {
+    if (message.isDeleted) return;
+
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.reply),
+              title: const Text('Reply'),
+              onTap: () {
+                Navigator.pop(context);
+                onReply();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.forward),
+              title: const Text('Forward'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ForwardMessageScreen(
+                      message: message,
+                      originalSenderName: isMe ? 'You' : 'Group: $groupName',
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
         ),
       ),
-      child: _GroupMessageBubble(
-        message: message,
-        isMe: isMe,
-        showSender: showSender,
-        currentUserId: currentUserId,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onLongPress: () => _showMessageOptions(context),
+      child: Dismissible(
+        key: Key(message.id),
+        direction: isMe ? DismissDirection.endToStart : DismissDirection.startToEnd,
+        confirmDismiss: (direction) async {
+          onReply();
+          return false; // Don't actually dismiss
+        },
+        background: Container(
+          alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+          padding: EdgeInsets.only(
+            left: isMe ? 0 : 20,
+            right: isMe ? 20 : 0,
+          ),
+          child: Icon(
+            Icons.reply,
+            color: Colors.grey[400],
+          ),
+        ),
+        child: _GroupMessageBubble(
+          message: message,
+          isMe: isMe,
+          showSender: showSender,
+          currentUserId: currentUserId,
+        ),
       ),
     );
   }
@@ -369,6 +415,29 @@ class _GroupMessageBubble extends StatelessWidget {
                   ),
                 ),
               ),
+            // Forwarded indicator
+            if (message.isForwarded) ...[
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.forward,
+                    size: 12,
+                    color: isMe ? Colors.white60 : Colors.grey[500],
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Forwarded from ${message.forwardedFrom}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color: isMe ? Colors.white60 : Colors.grey[500],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+            ],
             // Reply preview
             if (message.replyTo != null) ...[
               Container(

@@ -177,16 +177,17 @@ type BaseMessage struct {
 }
 
 type ChatMessage struct {
-	Type      string  `json:"type"`
-	ID        string  `json:"id,omitempty"`
-	To        string  `json:"to,omitempty"`           // For DMs: recipient user ID
-	GroupID   string  `json:"group_id,omitempty"`     // For groups: group ID
-	From      string  `json:"from,omitempty"`         // Sender ID (for incoming messages)
-	Content   string  `json:"content,omitempty"`
-	MediaID   *string `json:"media_id,omitempty"`
-	ReplyToID *string `json:"reply_to_id,omitempty"`  // ID of message being replied to
-	ReplyTo   *ReplyPreview `json:"reply_to,omitempty"` // Preview of replied message
-	CreatedAt string  `json:"created_at,omitempty"`
+	Type           string        `json:"type"`
+	ID             string        `json:"id,omitempty"`
+	To             string        `json:"to,omitempty"`              // For DMs: recipient user ID
+	GroupID        string        `json:"group_id,omitempty"`        // For groups: group ID
+	From           string        `json:"from,omitempty"`            // Sender ID (for incoming messages)
+	Content        string        `json:"content,omitempty"`
+	MediaID        *string       `json:"media_id,omitempty"`
+	ReplyToID      *string       `json:"reply_to_id,omitempty"`     // ID of message being replied to
+	ReplyTo        *ReplyPreview `json:"reply_to,omitempty"`        // Preview of replied message
+	ForwardedFrom  *string       `json:"forwarded_from,omitempty"`  // Original sender name for forwarded messages
+	CreatedAt      string        `json:"created_at,omitempty"`
 }
 
 // ReplyPreview contains a summary of the message being replied to

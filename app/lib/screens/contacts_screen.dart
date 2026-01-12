@@ -9,6 +9,7 @@ import '../models/contact.dart';
 import 'chat_screen.dart';
 import 'group_chat_screen.dart';
 import 'create_group_screen.dart';
+import 'search_screen.dart';
 
 class ContactsScreen extends ConsumerStatefulWidget {
   const ContactsScreen({super.key});
@@ -94,6 +95,17 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen>
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const SearchScreen(),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.person_add_outlined),
             onPressed: _showAddContactDialog,

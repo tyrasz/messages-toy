@@ -138,11 +138,12 @@ class WebSocketService {
   }
 
   void sendMessage({
-    String? to,         // For DMs
-    String? groupId,    // For group messages
+    String? to,            // For DMs
+    String? groupId,       // For group messages
     String? content,
     String? mediaId,
-    String? replyToId,  // For replies
+    String? replyToId,     // For replies
+    String? forwardedFrom, // Original sender name for forwarded messages
   }) {
     if (!isConnected) {
       print('Cannot send message: not connected');
@@ -161,6 +162,7 @@ class WebSocketService {
       if (content != null) 'content': content,
       if (mediaId != null) 'media_id': mediaId,
       if (replyToId != null) 'reply_to_id': replyToId,
+      if (forwardedFrom != null) 'forwarded_from': forwardedFrom,
     };
 
     _channel?.sink.add(jsonEncode(message));

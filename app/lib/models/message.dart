@@ -53,6 +53,7 @@ class Message {
   final DateTime? editedAt;  // When message was edited
   final bool isDeleted;      // Whether message is deleted for everyone
   final List<ReactionInfo> reactions; // Reactions on this message
+  final String? forwardedFrom; // Original sender name if forwarded
   final DateTime createdAt;
 
   Message({
@@ -76,6 +77,7 @@ class Message {
     this.editedAt,
     this.isDeleted = false,
     this.reactions = const [],
+    this.forwardedFrom,
     required this.createdAt,
   });
 
@@ -86,6 +88,7 @@ class Message {
   bool get isAudioMessage => mediaType == MediaType.audio;
   bool get isDocumentMessage => mediaType == MediaType.document;
   bool get hasReactions => reactions.isNotEmpty;
+  bool get isForwarded => forwardedFrom != null;
   String get displayContent => isDeleted ? '[Message deleted]' : (content ?? '');
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -118,6 +121,7 @@ class Message {
               ?.map((r) => ReactionInfo.fromJson(r as Map<String, dynamic>))
               .toList() ??
           [],
+      forwardedFrom: json['forwarded_from'] as String?,
       createdAt: json['created_at'] != null
           ? DateTime.parse(json['created_at'] as String)
           : DateTime.now(),
@@ -163,6 +167,7 @@ class Message {
       if (replyTo != null) 'reply_to': replyTo!.toJson(),
       'content': content,
       'media_id': mediaId,
+      if (forwardedFrom != null) 'forwarded_from': forwardedFrom,
       'status': status.name,
       'created_at': createdAt.toIso8601String(),
     };
@@ -189,6 +194,7 @@ class Message {
     DateTime? editedAt,
     bool? isDeleted,
     List<ReactionInfo>? reactions,
+    String? forwardedFrom,
     DateTime? createdAt,
   }) {
     return Message(
@@ -212,6 +218,7 @@ class Message {
       editedAt: editedAt ?? this.editedAt,
       isDeleted: isDeleted ?? this.isDeleted,
       reactions: reactions ?? this.reactions,
+      forwardedFrom: forwardedFrom ?? this.forwardedFrom,
       createdAt: createdAt ?? this.createdAt,
     );
   }
