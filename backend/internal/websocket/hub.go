@@ -205,6 +205,10 @@ type ChatMessage struct {
 	ReplyToID      *string       `json:"reply_to_id,omitempty"`     // ID of message being replied to
 	ReplyTo        *ReplyPreview `json:"reply_to,omitempty"`        // Preview of replied message
 	ForwardedFrom  *string       `json:"forwarded_from,omitempty"`  // Original sender name for forwarded messages
+	Latitude       *float64      `json:"latitude,omitempty"`        // For location sharing
+	Longitude      *float64      `json:"longitude,omitempty"`       // For location sharing
+	LocationName   *string       `json:"location_name,omitempty"`   // Optional place name
+	ScheduledAt    *string       `json:"scheduled_at,omitempty"`    // For scheduled messages
 	ExpiresAt      *string       `json:"expires_at,omitempty"`      // For disappearing messages
 	CreatedAt      string        `json:"created_at,omitempty"`
 }

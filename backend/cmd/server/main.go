@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"os"
 	"os/signal"
@@ -41,6 +42,11 @@ func main() {
 		&models.PinnedMessage{},
 		&models.MessageReadReceipt{},
 		&models.ArchivedConversation{},
+		&models.BroadcastList{},
+		&models.BroadcastListRecipient{},
+		&models.ChatTheme{},
+		&models.Story{},
+		&models.StoryView{},
 	)
 
 	// Create WebSocket hub
@@ -53,6 +59,12 @@ func main() {
 	// Start message cleanup service (for disappearing messages)
 	cleanupService := services.NewMessageCleanupService(database.DB, 1*time.Minute)
 	cleanupService.Start()
+
+	// Start scheduled message service
+	schedulerService := services.NewSchedulerService(func(msg *models.Message) {
+		deliverScheduledMessage(hub, msg)
+	})
+	schedulerService.Start()
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
@@ -107,6 +119,52 @@ func main() {
 	log.Printf("Server starting on port %s", port)
 	if err := app.Listen(":" + port); err != nil {
 		log.Fatal("Failed to start server:", err)
+	}
+}
+
+// deliverScheduledMessage delivers a scheduled message via WebSocket
+func deliverScheduledMessage(hub *websocket.Hub, msg *models.Message) {
+	outMsg := map[string]interface{}{
+		"type":       "message",
+		"id":         msg.ID,
+		"from":       msg.SenderID,
+		"content":    msg.Content,
+		"created_at": msg.CreatedAt.Format(time.RFC3339),
+	}
+
+	if msg.MediaID != nil {
+		outMsg["media_id"] = *msg.MediaID
+	}
+	if msg.Latitude != nil {
+		outMsg["latitude"] = *msg.Latitude
+	}
+	if msg.Longitude != nil {
+		outMsg["longitude"] = *msg.Longitude
+	}
+	if msg.LocationName != nil {
+		outMsg["location_name"] = *msg.LocationName
+	}
+
+	if msg.GroupID != nil {
+		outMsg["group_id"] = *msg.GroupID
+		msgBytes, _ := json.Marshal(outMsg)
+		sentCount := hub.SendToGroup(*msg.GroupID, msg.SenderID, msgBytes)
+		if sentCount > 0 {
+			database.DB.Model(msg).Update("status", models.MessageStatusDelivered)
+		}
+		// Push to offline members
+		offlineMembers := hub.GetOfflineGroupMemberIDs(*msg.GroupID, msg.SenderID)
+		for _, memberID := range offlineMembers {
+			services.PushMessageToOfflineUser(database.DB, memberID, msg.SenderID, msg.Content, true, *msg.GroupID)
+		}
+	} else if msg.RecipientID != nil {
+		outMsg["to"] = *msg.RecipientID
+		msgBytes, _ := json.Marshal(outMsg)
+		if hub.SendToUser(*msg.RecipientID, msgBytes) {
+			database.DB.Model(msg).Update("status", models.MessageStatusDelivered)
+		} else {
+			services.PushMessageToOfflineUser(database.DB, *msg.RecipientID, msg.SenderID, msg.Content, false, *msg.RecipientID)
+		}
 	}
 }
 

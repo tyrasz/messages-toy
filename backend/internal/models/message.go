@@ -24,6 +24,10 @@ type Message struct {
 	Content       string        `json:"content,omitempty"`
 	MediaID       *string       `json:"media_id,omitempty"`
 	ForwardedFrom *string       `json:"forwarded_from,omitempty"`            // Original sender name if forwarded
+	Latitude      *float64      `json:"latitude,omitempty"`                  // For location sharing
+	Longitude     *float64      `json:"longitude,omitempty"`                 // For location sharing
+	LocationName  *string       `json:"location_name,omitempty"`             // Optional place name
+	ScheduledAt   *time.Time    `gorm:"index" json:"scheduled_at,omitempty"` // For scheduled messages
 	Status        MessageStatus `gorm:"default:sent" json:"status"`
 	EditedAt      *time.Time    `json:"edited_at,omitempty"`                 // When message was edited
 	DeletedAt     *time.Time    `json:"deleted_at,omitempty"`                // Soft delete for "delete for everyone"
@@ -77,6 +81,14 @@ func (m *Message) IsExpired() bool {
 
 func (m *Message) IsDisappearing() bool {
 	return m.ExpiresAt != nil
+}
+
+func (m *Message) IsLocation() bool {
+	return m.Latitude != nil && m.Longitude != nil
+}
+
+func (m *Message) IsScheduled() bool {
+	return m.ScheduledAt != nil && m.ScheduledAt.After(time.Now())
 }
 
 func (m *Message) BeforeCreate(tx *gorm.DB) error {

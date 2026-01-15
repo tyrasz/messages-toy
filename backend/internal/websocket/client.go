@@ -186,6 +186,9 @@ func (c *Client) handleDirectMessage(msg ChatMessage) {
 		MediaID:       msg.MediaID,
 		ReplyToID:     msg.ReplyToID,
 		ForwardedFrom: msg.ForwardedFrom,
+		Latitude:      msg.Latitude,
+		Longitude:     msg.Longitude,
+		LocationName:  msg.LocationName,
 		ExpiresAt:     expiresAt,
 		Status:        models.MessageStatusSent,
 	}
@@ -212,6 +215,9 @@ func (c *Client) handleDirectMessage(msg ChatMessage) {
 		MediaID:       msg.MediaID,
 		ReplyToID:     msg.ReplyToID,
 		ForwardedFrom: msg.ForwardedFrom,
+		Latitude:      msg.Latitude,
+		Longitude:     msg.Longitude,
+		LocationName:  msg.LocationName,
 		ExpiresAt:     expiresAtStr,
 		CreatedAt:     message.CreatedAt.Format(time.RFC3339),
 	}
@@ -289,6 +295,9 @@ func (c *Client) handleGroupMessage(msg ChatMessage) {
 		MediaID:       msg.MediaID,
 		ReplyToID:     msg.ReplyToID,
 		ForwardedFrom: msg.ForwardedFrom,
+		Latitude:      msg.Latitude,
+		Longitude:     msg.Longitude,
+		LocationName:  msg.LocationName,
 		ExpiresAt:     expiresAt,
 		Status:        models.MessageStatusSent,
 	}
@@ -315,6 +324,9 @@ func (c *Client) handleGroupMessage(msg ChatMessage) {
 		MediaID:       msg.MediaID,
 		ReplyToID:     msg.ReplyToID,
 		ForwardedFrom: msg.ForwardedFrom,
+		Latitude:      msg.Latitude,
+		Longitude:     msg.Longitude,
+		LocationName:  msg.LocationName,
 		ExpiresAt:     expiresAtStr,
 		CreatedAt:     message.CreatedAt.Format(time.RFC3339),
 	}

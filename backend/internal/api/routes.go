@@ -52,6 +52,10 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	messages.Get("/conversations", messagesHandler.GetConversations)
 	messages.Get("/search", messagesHandler.Search)
 	messages.Get("/export", messagesHandler.Export)
+	messages.Post("/location", messagesHandler.SendLocation)
+	messages.Get("/scheduled", messagesHandler.GetScheduledMessages)
+	messages.Post("/scheduled", messagesHandler.ScheduleMessage)
+	messages.Delete("/scheduled/:id", messagesHandler.CancelScheduledMessage)
 	messages.Get("/:userId", messagesHandler.GetHistory)
 	messages.Post("/:id/forward", messagesHandler.Forward)
 	messages.Get("/:id/reactions", messagesHandler.GetReactions)
@@ -105,6 +109,25 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	settings.Get("/conversation", settingsHandler.GetConversationSettings)
 	settings.Post("/disappearing", settingsHandler.SetDisappearingMessages)
 	settings.Post("/mute", settingsHandler.MuteConversation)
+
+	// Themes
+	themesHandler := handlers.NewThemesHandler()
+	themes := protected.Group("/themes")
+	themes.Get("/", themesHandler.GetTheme)
+	themes.Post("/", themesHandler.SetTheme)
+	themes.Delete("/", themesHandler.DeleteTheme)
+	themes.Get("/presets", themesHandler.GetPresets)
+
+	// Stories/Status
+	storiesHandler := handlers.NewStoriesHandler(hub)
+	stories := protected.Group("/stories")
+	stories.Post("/", storiesHandler.Create)
+	stories.Get("/", storiesHandler.List)
+	stories.Get("/mine", storiesHandler.GetMyStories)
+	stories.Get("/:id", storiesHandler.Get)
+	stories.Post("/:id/view", storiesHandler.View)
+	stories.Get("/:id/views", storiesHandler.GetViews)
+	stories.Delete("/:id", storiesHandler.Delete)
 
 	// Polls
 	pollHandler := handlers.NewPollHandler(hub)

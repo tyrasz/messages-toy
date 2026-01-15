@@ -920,3 +920,258 @@ func (h *MessagesHandler) checkMessageAccess(userID string, message *models.Mess
 	}
 	return nil
 }
+
+// === Location Sharing ===
+
+type SendLocationRequest struct {
+	UserID       string   `json:"user_id,omitempty"`
+	GroupID      string   `json:"group_id,omitempty"`
+	Latitude     float64  `json:"latitude"`
+	Longitude    float64  `json:"longitude"`
+	LocationName *string  `json:"location_name,omitempty"`
+}
+
+// SendLocation sends a location message
+func (h *MessagesHandler) SendLocation(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+
+	var req SendLocationRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	if req.UserID == "" && req.GroupID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Either user_id or group_id is required",
+		})
+	}
+
+	if req.Latitude < -90 || req.Latitude > 90 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid latitude (must be between -90 and 90)",
+		})
+	}
+
+	if req.Longitude < -180 || req.Longitude > 180 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid longitude (must be between -180 and 180)",
+		})
+	}
+
+	var message *models.Message
+
+	if req.GroupID != "" {
+		// Group message
+		var membership models.GroupMember
+		if err := database.DB.Where("group_id = ? AND user_id = ?", req.GroupID, userID).First(&membership).Error; err != nil {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "You are not a member of this group",
+			})
+		}
+
+		message = &models.Message{
+			SenderID:     userID,
+			GroupID:      &req.GroupID,
+			Latitude:     &req.Latitude,
+			Longitude:    &req.Longitude,
+			LocationName: req.LocationName,
+			Status:       models.MessageStatusSent,
+		}
+	} else {
+		// DM
+		if models.IsEitherBlocked(database.DB, userID, req.UserID) {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "Cannot send message to this user",
+			})
+		}
+
+		message = &models.Message{
+			SenderID:     userID,
+			RecipientID:  &req.UserID,
+			Latitude:     &req.Latitude,
+			Longitude:    &req.Longitude,
+			LocationName: req.LocationName,
+			Status:       models.MessageStatusSent,
+		}
+	}
+
+	if err := database.DB.Create(message).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to send location",
+		})
+	}
+
+	// Send via WebSocket
+	if h.hub != nil {
+		outMsg := map[string]interface{}{
+			"type":       "message",
+			"id":         message.ID,
+			"from":       userID,
+			"latitude":   req.Latitude,
+			"longitude":  req.Longitude,
+			"created_at": message.CreatedAt.Format(time.RFC3339),
+		}
+		if req.LocationName != nil {
+			outMsg["location_name"] = *req.LocationName
+		}
+
+		if req.GroupID != "" {
+			outMsg["group_id"] = req.GroupID
+			msgBytes, _ := json.Marshal(outMsg)
+			h.hub.SendToGroup(req.GroupID, userID, msgBytes)
+		} else {
+			outMsg["to"] = req.UserID
+			msgBytes, _ := json.Marshal(outMsg)
+			if h.hub.SendToUser(req.UserID, msgBytes) {
+				database.DB.Model(message).Update("status", models.MessageStatusDelivered)
+			} else {
+				services.PushMessageToOfflineUser(database.DB, req.UserID, userID, "📍 Shared a location", false, req.UserID)
+			}
+		}
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"id":            message.ID,
+		"latitude":      req.Latitude,
+		"longitude":     req.Longitude,
+		"location_name": req.LocationName,
+		"created_at":    message.CreatedAt,
+	})
+}
+
+// === Scheduled Messages ===
+
+type ScheduleMessageRequest struct {
+	UserID      string  `json:"user_id,omitempty"`
+	GroupID     string  `json:"group_id,omitempty"`
+	Content     string  `json:"content,omitempty"`
+	MediaID     *string `json:"media_id,omitempty"`
+	ScheduledAt string  `json:"scheduled_at"` // RFC3339 format
+}
+
+// ScheduleMessage creates a scheduled message
+func (h *MessagesHandler) ScheduleMessage(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+
+	var req ScheduleMessageRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	if req.UserID == "" && req.GroupID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Either user_id or group_id is required",
+		})
+	}
+
+	if req.Content == "" && req.MediaID == nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Content or media_id is required",
+		})
+	}
+
+	scheduledAt, err := time.Parse(time.RFC3339, req.ScheduledAt)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid scheduled_at format (use RFC3339)",
+		})
+	}
+
+	if scheduledAt.Before(time.Now()) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Scheduled time must be in the future",
+		})
+	}
+
+	// Validate target
+	if req.GroupID != "" {
+		var membership models.GroupMember
+		if err := database.DB.Where("group_id = ? AND user_id = ?", req.GroupID, userID).First(&membership).Error; err != nil {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "You are not a member of this group",
+			})
+		}
+	} else {
+		if models.IsEitherBlocked(database.DB, userID, req.UserID) {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "Cannot send message to this user",
+			})
+		}
+	}
+
+	var recipientID, groupID *string
+	if req.UserID != "" {
+		recipientID = &req.UserID
+	}
+	if req.GroupID != "" {
+		groupID = &req.GroupID
+	}
+
+	message, err := services.ScheduleMessage(userID, recipientID, groupID, req.Content, req.MediaID, scheduledAt)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to schedule message",
+		})
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"id":           message.ID,
+		"content":      message.Content,
+		"scheduled_at": scheduledAt.Format(time.RFC3339),
+		"user_id":      req.UserID,
+		"group_id":     req.GroupID,
+	})
+}
+
+// GetScheduledMessages returns all pending scheduled messages for the user
+func (h *MessagesHandler) GetScheduledMessages(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+
+	messages, err := services.GetScheduledMessages(userID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to get scheduled messages",
+		})
+	}
+
+	result := make([]fiber.Map, len(messages))
+	for i, msg := range messages {
+		item := fiber.Map{
+			"id":           msg.ID,
+			"content":      msg.Content,
+			"scheduled_at": msg.ScheduledAt.Format(time.RFC3339),
+			"created_at":   msg.CreatedAt.Format(time.RFC3339),
+		}
+		if msg.RecipientID != nil {
+			item["user_id"] = *msg.RecipientID
+		}
+		if msg.GroupID != nil {
+			item["group_id"] = *msg.GroupID
+		}
+		result[i] = item
+	}
+
+	return c.JSON(fiber.Map{
+		"scheduled_messages": result,
+	})
+}
+
+// CancelScheduledMessage cancels a scheduled message
+func (h *MessagesHandler) CancelScheduledMessage(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	messageID := c.Params("id")
+
+	if err := services.CancelScheduledMessage(messageID, userID); err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Scheduled message not found or already sent",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Scheduled message cancelled",
+	})
+}
