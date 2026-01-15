@@ -50,6 +50,8 @@ func setupTestDB(t *testing.T) func() {
 		&models.Media{},
 		&models.Story{},
 		&models.StoryView{},
+		&models.LinkPreview{},
+		&models.DeviceToken{},
 	)
 	if err != nil {
 		t.Fatalf("Failed to migrate test database: %v", err)
@@ -147,4 +149,9 @@ func assertJSONFieldExists(t *testing.T, data map[string]interface{}, field stri
 	if _, exists := data[field]; !exists {
 		t.Errorf("Expected field %q to exist in response", field)
 	}
+}
+
+// parseResponseArray parses JSON array response body into a slice
+func parseResponseArray(body []byte, result interface{}) error {
+	return json.Unmarshal(body, result)
 }
