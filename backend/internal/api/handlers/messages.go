@@ -28,19 +28,30 @@ func (h *MessagesHandler) GetHistory(c *fiber.Ctx) error {
 	// Pagination
 	limit, _ := strconv.Atoi(c.Query("limit", "50"))
 	offset, _ := strconv.Atoi(c.Query("offset", "0"))
+	sinceStr := c.Query("since")
 
 	if limit > 100 {
 		limit = 100
 	}
 
-	var messages []models.Message
-	err := database.DB.
+	query := database.DB.
 		Preload("Media").
 		Preload("ReplyTo").
 		Where(
 			"group_id IS NULL AND ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))",
 			userID, otherUserID, otherUserID, userID,
-		).
+		)
+
+	// Filter by timestamp if provided (for sync)
+	if sinceStr != "" {
+		sinceTime, err := time.Parse(time.RFC3339, sinceStr)
+		if err == nil {
+			query = query.Where("created_at > ?", sinceTime)
+		}
+	}
+
+	var messages []models.Message
+	err := query.
 		Order("created_at DESC").
 		Limit(limit).
 		Offset(offset).

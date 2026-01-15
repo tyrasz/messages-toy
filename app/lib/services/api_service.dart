@@ -164,10 +164,11 @@ class ApiService {
     return conversations;
   }
 
-  Future<List<Message>> getMessages(String userId, {int limit = 50, int offset = 0}) async {
+  Future<List<Message>> getMessages(String userId, {int limit = 50, int offset = 0, DateTime? since}) async {
     final response = await _dio.get('/messages/$userId', queryParameters: {
       'limit': limit,
       'offset': offset,
+      if (since != null) 'since': since.toIso8601String(),
     });
     final messages = (response.data['messages'] as List)
         .map((json) => Message.fromJson(json))
