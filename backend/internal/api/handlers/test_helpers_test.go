@@ -46,6 +46,10 @@ func setupTestDB(t *testing.T) func() {
 		&models.BroadcastList{},
 		&models.BroadcastListRecipient{},
 		&models.Reaction{},
+		&models.ChatTheme{},
+		&models.Media{},
+		&models.Story{},
+		&models.StoryView{},
 	)
 	if err != nil {
 		t.Fatalf("Failed to migrate test database: %v", err)

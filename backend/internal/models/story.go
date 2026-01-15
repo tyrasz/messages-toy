@@ -178,7 +178,14 @@ func DeleteStory(db *gorm.DB, storyID, userID string) error {
 			return err
 		}
 		// Delete story
-		return tx.Where("id = ? AND user_id = ?", storyID, userID).Delete(&Story{}).Error
+		result := tx.Where("id = ? AND user_id = ?", storyID, userID).Delete(&Story{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
 	})
 }
 
