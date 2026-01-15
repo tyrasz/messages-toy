@@ -112,8 +112,9 @@ func (h *MessagesHandler) GetConversations(c *fiber.Ctx) error {
 		var otherUser models.User
 		database.DB.First(&otherUser, "id = ?", otherUserID)
 
+		online := h.hub != nil && h.hub.IsOnline(otherUserID)
 		result = append(result, fiber.Map{
-			"user":         otherUser.ToResponse(false), // TODO: check online status
+			"user":         otherUser.ToResponse(online),
 			"last_message": lastMessage,
 			"unread_count": unreadCount,
 		})
