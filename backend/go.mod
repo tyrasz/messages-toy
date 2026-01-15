@@ -8,11 +8,14 @@ require (
 	cloud.google.com/go/vision v1.2.0
 	cloud.google.com/go/vision/v2 v2.9.6
 	firebase.google.com/go/v4 v4.14.1
+	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/gofiber/contrib/websocket v1.3.0
 	github.com/gofiber/fiber/v2 v2.52.0
-	github.com/golang-jwt/jwt/v5 v5.2.0
+	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/uuid v1.6.0
+	github.com/sideshow/apns2 v0.25.0
 	golang.org/x/crypto v0.41.0
+	golang.org/x/net v0.43.0
 	google.golang.org/api v0.247.0
 	gorm.io/driver/sqlite v1.5.4
 	gorm.io/gorm v1.25.5
@@ -72,7 +75,6 @@ require (
 	go.opentelemetry.io/otel/sdk v1.36.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.36.0 // indirect
 	go.opentelemetry.io/otel/trace v1.36.0 // indirect
-	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect

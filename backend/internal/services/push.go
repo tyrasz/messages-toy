@@ -7,17 +7,16 @@ import (
 	"os"
 	"sync"
 
-	firebase "firebase.google.com/go/v4"
-	"firebase.google.com/go/v4/messaging"
-	"google.golang.org/api/option"
 	"gorm.io/gorm"
 	"messenger/internal/database"
 	"messenger/internal/models"
 )
 
+// PushService coordinates push notifications across multiple providers
+// It abstracts away the specific push provider (FCM, APNs, Web Push, etc.)
 type PushService struct {
-	client *messaging.Client
-	mu     sync.RWMutex
+	registry *ProviderRegistry
+	mu       sync.RWMutex
 }
 
 var (
@@ -28,44 +27,75 @@ var (
 // GetPushService returns the singleton push service instance
 func GetPushService() *PushService {
 	pushServiceOnce.Do(func() {
-		pushService = &PushService{}
-		if err := pushService.initialize(); err != nil {
-			log.Printf("Warning: Push notifications disabled - %v", err)
+		pushService = &PushService{
+			registry: NewProviderRegistry(),
 		}
+		pushService.initializeProviders()
 	})
 	return pushService
 }
 
-func (ps *PushService) initialize() error {
-	credPath := os.Getenv("FIREBASE_CREDENTIALS_PATH")
-	if credPath == "" {
-		return fmt.Errorf("FIREBASE_CREDENTIALS_PATH not set")
+// initializeProviders sets up all configured push providers
+func (ps *PushService) initializeProviders() {
+	ctx := context.Background()
+
+	// Initialize Firebase/FCM provider if configured
+	if os.Getenv("FIREBASE_CREDENTIALS_PATH") != "" || os.Getenv("FIREBASE_CREDENTIALS_JSON") != "" {
+		fcm := NewFirebasePushProvider()
+		if err := fcm.Initialize(ctx); err != nil {
+			log.Printf("Warning: Firebase push provider failed to initialize - %v", err)
+		} else {
+			ps.registry.Register(fcm)
+		}
 	}
 
-	opt := option.WithCredentialsFile(credPath)
-	app, err := firebase.NewApp(context.Background(), nil, opt)
-	if err != nil {
-		return fmt.Errorf("failed to create Firebase app: %w", err)
+	// Initialize APNs provider if configured (direct Apple Push without Firebase)
+	if os.Getenv("APNS_BUNDLE_ID") != "" {
+		apns := NewAPNsPushProvider()
+		if err := apns.Initialize(ctx); err != nil {
+			log.Printf("Warning: APNs push provider failed to initialize - %v", err)
+		} else {
+			ps.registry.Register(apns)
+		}
 	}
 
-	client, err := app.Messaging(context.Background())
-	if err != nil {
-		return fmt.Errorf("failed to get messaging client: %w", err)
+	// Initialize Web Push provider if configured (browsers without Firebase)
+	if os.Getenv("VAPID_PUBLIC_KEY") != "" && os.Getenv("VAPID_PRIVATE_KEY") != "" {
+		webpush := NewWebPushProvider()
+		if err := webpush.Initialize(ctx); err != nil {
+			log.Printf("Warning: Web Push provider failed to initialize - %v", err)
+		} else {
+			ps.registry.Register(webpush)
+		}
 	}
 
-	ps.mu.Lock()
-	ps.client = client
-	ps.mu.Unlock()
-
-	log.Println("Push notification service initialized successfully")
-	return nil
+	enabledCount := len(ps.registry.GetEnabled())
+	if enabledCount == 0 {
+		log.Println("Warning: No push providers configured - push notifications disabled")
+	} else {
+		log.Printf("Push service initialized with %d provider(s)", enabledCount)
+	}
 }
 
-// IsEnabled returns whether push notifications are enabled
+// RegisterProvider allows registering custom push providers at runtime
+func (ps *PushService) RegisterProvider(provider PushProvider) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.registry.Register(provider)
+}
+
+// GetProvider returns a specific provider by name
+func (ps *PushService) GetProvider(name string) (PushProvider, bool) {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	return ps.registry.Get(name)
+}
+
+// IsEnabled returns whether any push provider is available
 func (ps *PushService) IsEnabled() bool {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
-	return ps.client != nil
+	return len(ps.registry.GetEnabled()) > 0
 }
 
 // SendToUser sends a push notification to all devices of a user
@@ -83,13 +113,41 @@ func (ps *PushService) SendToUser(userID string, notification *Notification) err
 		return nil // User has no registered devices
 	}
 
-	// Extract token strings
-	tokenStrings := make([]string, len(tokens))
-	for i, t := range tokens {
-		tokenStrings[i] = t.Token
+	// Group tokens by platform/provider
+	tokensByPlatform := make(map[models.DevicePlatform][]string)
+	for _, t := range tokens {
+		platform := t.Platform
+		if platform == "" {
+			platform = models.PlatformAndroid // Default
+		}
+		tokensByPlatform[platform] = append(tokensByPlatform[platform], t.Token)
 	}
 
-	return ps.SendToTokens(tokenStrings, notification)
+	// Send to each platform's provider
+	var lastErr error
+	for platform, platformTokens := range tokensByPlatform {
+		provider, ok := ps.registry.Get(mapPlatformToProvider(string(platform)))
+		if !ok || !provider.IsEnabled() {
+			// Fall back to FCM for unknown platforms
+			provider, ok = ps.registry.Get("fcm")
+			if !ok || !provider.IsEnabled() {
+				continue
+			}
+		}
+
+		failedTokens, err := provider.Send(context.Background(), platformTokens, notification)
+		if err != nil {
+			log.Printf("Push provider %s error: %v", provider.Name(), err)
+			lastErr = err
+		}
+
+		// Clean up invalid tokens
+		for _, token := range failedTokens {
+			models.UnregisterToken(database.DB, token)
+		}
+	}
+
+	return lastErr
 }
 
 // SendToTokens sends a push notification to specific device tokens
@@ -102,104 +160,24 @@ func (ps *PushService) SendToTokens(tokens []string, notification *Notification)
 		return nil
 	}
 
-	ps.mu.RLock()
-	client := ps.client
-	ps.mu.RUnlock()
-
-	message := &messaging.MulticastMessage{
-		Tokens: tokens,
-		Notification: &messaging.Notification{
-			Title: notification.Title,
-			Body:  notification.Body,
-		},
-		Data: notification.Data,
-		Android: &messaging.AndroidConfig{
-			Priority: "high",
-			Notification: &messaging.AndroidNotification{
-				ClickAction: "FLUTTER_NOTIFICATION_CLICK",
-				ChannelID:   "messages",
-			},
-		},
-		APNS: &messaging.APNSConfig{
-			Payload: &messaging.APNSPayload{
-				Aps: &messaging.Aps{
-					Badge:            notification.Badge,
-					Sound:            "default",
-					ContentAvailable: true,
-					MutableContent:   true,
-				},
-			},
-		},
+	// Use the first available provider (typically FCM)
+	providers := ps.registry.GetEnabled()
+	if len(providers) == 0 {
+		return ErrNoProvidersAvailable
 	}
 
-	response, err := client.SendEachForMulticast(context.Background(), message)
+	provider := providers[0]
+	failedTokens, err := provider.Send(context.Background(), tokens, notification)
 	if err != nil {
-		return fmt.Errorf("failed to send multicast message: %w", err)
+		return err
 	}
 
-	// Log failures and clean up invalid tokens
-	if response.FailureCount > 0 {
-		for i, resp := range response.Responses {
-			if !resp.Success {
-				log.Printf("Failed to send to token %s: %v", tokens[i], resp.Error)
-				// Remove invalid tokens
-				if isInvalidTokenError(resp.Error) {
-					models.UnregisterToken(database.DB, tokens[i])
-				}
-			}
-		}
+	// Clean up invalid tokens
+	for _, token := range failedTokens {
+		models.UnregisterToken(database.DB, token)
 	}
-
-	log.Printf("Push notification sent: %d success, %d failures",
-		response.SuccessCount, response.FailureCount)
 
 	return nil
-}
-
-// Notification represents a push notification to send
-type Notification struct {
-	Title string
-	Body  string
-	Data  map[string]string
-	Badge *int
-}
-
-// NewMessageNotification creates a notification for a new message
-func NewMessageNotification(senderName, content, conversationID string, isGroup bool) *Notification {
-	title := senderName
-	body := content
-	if len(body) > 100 {
-		body = body[:97] + "..."
-	}
-	if body == "" {
-		body = "Sent an attachment"
-	}
-
-	data := map[string]string{
-		"type":            "new_message",
-		"conversation_id": conversationID,
-	}
-	if isGroup {
-		data["is_group"] = "true"
-	}
-
-	return &Notification{
-		Title: title,
-		Body:  body,
-		Data:  data,
-	}
-}
-
-// isInvalidTokenError checks if the error indicates an invalid token
-func isInvalidTokenError(err error) bool {
-	if err == nil {
-		return false
-	}
-	// FCM returns specific error codes for invalid tokens
-	errStr := err.Error()
-	return errStr == "registration-token-not-registered" ||
-		errStr == "invalid-registration-token" ||
-		errStr == "invalid-argument"
 }
 
 // SendTestNotification sends a test notification to a specific token
@@ -213,6 +191,20 @@ func (ps *PushService) SendTestNotification(token string) error {
 		Body:  "Push notifications are working!",
 		Data:  map[string]string{"type": "test"},
 	})
+}
+
+// mapPlatformToProvider maps device platform to push provider name
+func mapPlatformToProvider(platform string) string {
+	switch platform {
+	case "ios":
+		return "fcm" // FCM handles APNs routing
+	case "android":
+		return "fcm"
+	case "web":
+		return "fcm" // Could be "webpush" if that provider is implemented
+	default:
+		return "fcm"
+	}
 }
 
 // PushMessageToOfflineUser is a helper to send push notification for a message
