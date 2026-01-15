@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test files
+*_test.go
+*.test
+
+# Documentation
+*.md
+docs/
+
+# Local config
+.env
+.env.local
+config/
+
+# Upload directories (mounted as volumes)
+uploads/
+
+# Database files
+*.db
+*.sqlite
+
+# Temporary files
+tmp/
+*.tmp
+*.log

@@ -18,15 +18,15 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	// API routes
 	api := app.Group("/api")
 
-	// Auth routes (public)
+	// Auth routes (public) - rate limited to prevent brute force
 	authHandler := handlers.NewAuthHandler()
-	auth := api.Group("/auth")
+	auth := api.Group("/auth", middleware.AuthLimiter)
 	auth.Post("/register", authHandler.Register)
 	auth.Post("/login", authHandler.Login)
 	auth.Post("/refresh", authHandler.Refresh)
 
-	// Protected routes
-	protected := api.Group("", middleware.AuthRequired())
+	// Protected routes with general API rate limiting
+	protected := api.Group("", middleware.AuthRequired(), middleware.APILimiter)
 
 	// Contacts
 	contactsHandler := handlers.NewContactsHandler(hub)
@@ -73,10 +73,10 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	groups.Post("/:id/leave", groupsHandler.Leave)
 	groups.Get("/:id/messages", groupsHandler.GetMessages)
 
-	// Media
+	// Media - with stricter rate limiting for uploads
 	mediaHandler := handlers.NewMediaHandler(hub)
 	media := protected.Group("/media")
-	media.Post("/upload", mediaHandler.Upload)
+	media.Post("/upload", middleware.MediaLimiter, mediaHandler.Upload)
 	media.Get("/:id", mediaHandler.Get)
 	media.Get("/:id/thumbnail", mediaHandler.GetThumbnail)
 

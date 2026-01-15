@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  messenger-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_PATH=/app/data/messenger.db
+      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      - FIREBASE_CREDENTIALS_PATH=/app/config/firebase-credentials.json
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/config/gcp-credentials.json
+    volumes:
+      - messenger-data:/app/data
+      - messenger-uploads:/app/uploads
+      - ./config:/app/config:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: PostgreSQL for production
+  postgres:
+    image: postgres:16-alpine
+    profiles:
+      - production
+    environment:
+      - POSTGRES_USER=messenger
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_DB=messenger
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U messenger"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: Redis for caching/sessions
+  redis:
+    image: redis:7-alpine
+    profiles:
+      - production
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  messenger-data:
+  messenger-uploads:
+  postgres-data:
+  redis-data:
