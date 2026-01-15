@@ -7,6 +7,14 @@ import (
 	"gorm.io/gorm"
 )
 
+type UserRole string
+
+const (
+	UserRoleUser      UserRole = "user"
+	UserRoleModerator UserRole = "moderator"
+	UserRoleAdmin     UserRole = "admin"
+)
+
 type User struct {
 	ID           string    `gorm:"primaryKey" json:"id"`
 	Username     string    `gorm:"uniqueIndex;not null" json:"username"`
@@ -16,9 +24,20 @@ type User struct {
 	AvatarURL    string    `json:"avatar_url,omitempty"`
 	About        string    `json:"about,omitempty"`         // Status/bio text
 	StatusEmoji  string    `json:"status_emoji,omitempty"`  // Optional status emoji
+	Role         UserRole  `gorm:"default:user" json:"role,omitempty"`
 	LastSeen     time.Time `json:"last_seen,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// IsAdmin returns true if the user has admin role
+func (u *User) IsAdmin() bool {
+	return u.Role == UserRoleAdmin
+}
+
+// IsModerator returns true if the user has moderator or admin role
+func (u *User) IsModerator() bool {
+	return u.Role == UserRoleModerator || u.Role == UserRoleAdmin
 }
 
 func (u *User) BeforeCreate(tx *gorm.DB) error {

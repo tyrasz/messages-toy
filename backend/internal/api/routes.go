@@ -144,9 +144,9 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	pinned.Delete("/", pinnedHandler.Unpin)
 	pinned.Get("/", pinnedHandler.Get)
 
-	// Admin routes (for moderation review)
+	// Admin routes (for moderation review) - requires moderator role
 	adminHandler := handlers.NewAdminHandler()
-	admin := protected.Group("/admin")
+	admin := protected.Group("/admin", middleware.ModeratorRequired())
 	admin.Get("/review", adminHandler.GetPendingReview)
 	admin.Post("/review/:id", adminHandler.Review)
 

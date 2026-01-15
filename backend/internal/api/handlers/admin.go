@@ -16,10 +16,8 @@ func NewAdminHandler() *AdminHandler {
 }
 
 // GetPendingReview returns media items pending human review
+// Note: ModeratorRequired middleware handles role verification
 func (h *AdminHandler) GetPendingReview(c *fiber.Ctx) error {
-	// TODO: Add proper admin role check
-	// For now, just check if user exists
-	_ = middleware.GetUserID(c)
 
 	var media []models.Media
 	if err := database.DB.
@@ -44,8 +42,8 @@ type ReviewInput struct {
 }
 
 // Review allows admin to approve or reject flagged media
+// Note: ModeratorRequired middleware handles role verification
 func (h *AdminHandler) Review(c *fiber.Ctx) error {
-	// TODO: Add proper admin role check
 	reviewerID := middleware.GetUserID(c)
 	mediaID := c.Params("id")
 

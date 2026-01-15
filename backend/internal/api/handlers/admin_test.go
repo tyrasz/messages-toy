@@ -16,18 +16,32 @@ func setupAdminTestApp() *fiber.App {
 	handler := NewAdminHandler()
 
 	protected := app.Group("", middleware.AuthRequired())
-	admin := protected.Group("/admin")
+	admin := protected.Group("/admin", middleware.ModeratorRequired())
 	admin.Get("/review", handler.GetPendingReview)
 	admin.Post("/review/:id", handler.Review)
 
 	return app
 }
 
+// createModeratorUser creates a user with moderator role
+func createModeratorUser(t *testing.T, username, password string) (*models.User, string) {
+	user, token := createTestUser(t, username, password)
+	database.DB.Model(user).Update("role", models.UserRoleModerator)
+	return user, token
+}
+
+// createAdminUser creates a user with admin role
+func createAdminUser(t *testing.T, username, password string) (*models.User, string) {
+	user, token := createTestUser(t, username, password)
+	database.DB.Model(user).Update("role", models.UserRoleAdmin)
+	return user, token
+}
+
 func TestGetPendingReview_Empty(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	_, token := createTestUser(t, "admin", "password123")
+	_, token := createModeratorUser(t, "moderator", "password123")
 	app := setupAdminTestApp()
 
 	resp, body := makeRequest(app, testRequest{
@@ -42,11 +56,30 @@ func TestGetPendingReview_Empty(t *testing.T) {
 	assertJSONField(t, data, "count", float64(0))
 }
 
+func TestGetPendingReview_NotModerator(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	_, token := createTestUser(t, "normaluser", "password123")
+	app := setupAdminTestApp()
+
+	resp, body := makeRequest(app, testRequest{
+		Method: "GET",
+		Path:   "/admin/review",
+		Token:  token,
+	})
+
+	assertStatus(t, resp, http.StatusForbidden)
+
+	data := parseResponse(body)
+	assertJSONFieldExists(t, data, "error")
+}
+
 func TestGetPendingReview_WithItems(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	user, token := createTestUser(t, "admin", "password123")
+	user, token := createModeratorUser(t, "moderator", "password123")
 	app := setupAdminTestApp()
 
 	// Create some media items pending review
@@ -85,7 +118,7 @@ func TestReview_Approve(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	user, token := createTestUser(t, "admin", "password123")
+	user, token := createModeratorUser(t, "moderator", "password123")
 	app := setupAdminTestApp()
 
 	// Create temp directory and file for the test
@@ -133,7 +166,7 @@ func TestReview_Reject(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	user, token := createTestUser(t, "admin", "password123")
+	user, token := createModeratorUser(t, "moderator", "password123")
 	app := setupAdminTestApp()
 
 	// Create temp file
@@ -186,7 +219,7 @@ func TestReview_InvalidAction(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	user, token := createTestUser(t, "admin", "password123")
+	user, token := createModeratorUser(t, "moderator", "password123")
 	app := setupAdminTestApp()
 
 	// Create media item
@@ -219,7 +252,7 @@ func TestReview_NotPendingReview(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	user, token := createTestUser(t, "admin", "password123")
+	user, token := createModeratorUser(t, "moderator", "password123")
 	app := setupAdminTestApp()
 
 	// Create already approved media item
@@ -252,7 +285,7 @@ func TestReview_NotFound(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	_, token := createTestUser(t, "admin", "password123")
+	_, token := createModeratorUser(t, "moderator", "password123")
 	app := setupAdminTestApp()
 
 	resp, body := makeRequest(app, testRequest{
