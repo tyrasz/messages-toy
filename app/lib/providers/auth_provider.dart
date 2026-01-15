@@ -5,6 +5,7 @@ import '../services/websocket_service.dart';
 import '../services/offline_database.dart';
 import '../services/sync_service.dart';
 import '../services/push_service.dart';
+import '../services/connectivity_service.dart';
 
 final apiServiceProvider = Provider<ApiService>((ref) {
   return ApiService();
@@ -28,6 +29,18 @@ final syncServiceProvider = Provider<SyncService>((ref) {
 final pushServiceProvider = Provider<PushService>((ref) {
   final api = ref.watch(apiServiceProvider);
   return PushService(api: api);
+});
+
+final connectivityServiceProvider = Provider<ConnectivityService>((ref) {
+  final service = ConnectivityService();
+  service.initialize();
+  ref.onDispose(() => service.dispose());
+  return service;
+});
+
+final networkStatusProvider = StreamProvider<NetworkStatus>((ref) {
+  final service = ref.watch(connectivityServiceProvider);
+  return service.statusStream;
 });
 
 enum AuthStatus { unknown, authenticated, unauthenticated }

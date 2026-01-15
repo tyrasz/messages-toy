@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'providers/auth_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/contacts_screen.dart';
+import 'widgets/connection_status_banner.dart';
 
 void main() {
   runApp(
@@ -57,17 +58,27 @@ class AuthWrapper extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authProvider);
 
+    Widget child;
     switch (authState.status) {
       case AuthStatus.unknown:
-        return const Scaffold(
+        child = const Scaffold(
           body: Center(
             child: CircularProgressIndicator(),
           ),
         );
+        break;
       case AuthStatus.authenticated:
-        return const ContactsScreen();
+        child = const ContactsScreen();
+        break;
       case AuthStatus.unauthenticated:
-        return const LoginScreen();
+        child = const LoginScreen();
+        break;
     }
+
+    // Wrap authenticated screens with connection status banner
+    if (authState.status == AuthStatus.authenticated) {
+      return ConnectionAwareWrapper(child: child);
+    }
+    return child;
   }
 }
