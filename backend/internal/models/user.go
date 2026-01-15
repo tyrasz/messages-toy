@@ -14,6 +14,8 @@ type User struct {
 	PasswordHash string    `gorm:"not null" json:"-"`
 	DisplayName  string    `json:"display_name,omitempty"`
 	AvatarURL    string    `json:"avatar_url,omitempty"`
+	About        string    `json:"about,omitempty"`         // Status/bio text
+	StatusEmoji  string    `json:"status_emoji,omitempty"`  // Optional status emoji
 	LastSeen     time.Time `json:"last_seen,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -31,6 +33,8 @@ type UserResponse struct {
 	Username    string    `json:"username"`
 	DisplayName string    `json:"display_name,omitempty"`
 	AvatarURL   string    `json:"avatar_url,omitempty"`
+	About       string    `json:"about,omitempty"`
+	StatusEmoji string    `json:"status_emoji,omitempty"`
 	LastSeen    time.Time `json:"last_seen,omitempty"`
 	Online      bool      `json:"online"`
 }
@@ -41,6 +45,8 @@ func (u *User) ToResponse(online bool) UserResponse {
 		Username:    u.Username,
 		DisplayName: u.DisplayName,
 		AvatarURL:   u.AvatarURL,
+		About:       u.About,
+		StatusEmoji: u.StatusEmoji,
 		LastSeen:    u.LastSeen,
 		Online:      online,
 	}

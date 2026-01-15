@@ -3,6 +3,8 @@ class User {
   final String username;
   final String? displayName;
   final String? avatarUrl;
+  final String? about;
+  final String? statusEmoji;
   final DateTime? lastSeen;
   final bool online;
 
@@ -11,6 +13,8 @@ class User {
     required this.username,
     this.displayName,
     this.avatarUrl,
+    this.about,
+    this.statusEmoji,
     this.lastSeen,
     this.online = false,
   });
@@ -21,6 +25,8 @@ class User {
       username: json['username'] as String,
       displayName: json['display_name'] as String?,
       avatarUrl: json['avatar_url'] as String?,
+      about: json['about'] as String?,
+      statusEmoji: json['status_emoji'] as String?,
       lastSeen: json['last_seen'] != null
           ? DateTime.parse(json['last_seen'] as String)
           : null,
@@ -34,6 +40,8 @@ class User {
       'username': username,
       'display_name': displayName,
       'avatar_url': avatarUrl,
+      'about': about,
+      'status_emoji': statusEmoji,
       'last_seen': lastSeen?.toIso8601String(),
       'online': online,
     };
@@ -44,6 +52,8 @@ class User {
     String? username,
     String? displayName,
     String? avatarUrl,
+    String? about,
+    String? statusEmoji,
     DateTime? lastSeen,
     bool? online,
   }) {
@@ -52,6 +62,8 @@ class User {
       username: username ?? this.username,
       displayName: displayName ?? this.displayName,
       avatarUrl: avatarUrl ?? this.avatarUrl,
+      about: about ?? this.about,
+      statusEmoji: statusEmoji ?? this.statusEmoji,
       lastSeen: lastSeen ?? this.lastSeen,
       online: online ?? this.online,
     );

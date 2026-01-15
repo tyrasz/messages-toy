@@ -158,6 +158,12 @@ func (c *Client) handleChatMessage(data []byte) {
 }
 
 func (c *Client) handleDirectMessage(msg ChatMessage) {
+	// Check if messaging the bot
+	if msg.To == services.BotUserID {
+		c.handleBotMessage(msg)
+		return
+	}
+
 	// Check if either user has blocked the other
 	if models.IsEitherBlocked(database.DB, c.UserID, msg.To) {
 		c.sendError("Cannot send message to this user")
@@ -366,6 +372,37 @@ func (c *Client) handleGroupMessage(msg ChatMessage) {
 func (c *Client) handleTypingMessage(data []byte) {
 	var msg TypingMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
+		return
+	}
+
+	// Handle group typing indicator
+	if msg.GroupID != "" {
+		// Check if user is a member of the group
+		var membership models.GroupMember
+		if err := database.DB.Where("group_id = ? AND user_id = ?", msg.GroupID, c.UserID).First(&membership).Error; err != nil {
+			return
+		}
+
+		// Forward typing indicator to all group members
+		outMsg := struct {
+			Type    string `json:"type"`
+			GroupID string `json:"group_id"`
+			From    string `json:"from"`
+			Typing  bool   `json:"typing"`
+		}{
+			Type:    "typing",
+			GroupID: msg.GroupID,
+			From:    c.UserID,
+			Typing:  msg.Typing,
+		}
+
+		msgBytes, _ := json.Marshal(outMsg)
+		c.Hub.SendToGroup(msg.GroupID, c.UserID, msgBytes)
+		return
+	}
+
+	// Handle DM typing indicator
+	if msg.To == "" {
 		return
 	}
 
@@ -656,4 +693,99 @@ func (c *Client) sendError(message string) {
 	}
 	errBytes, _ := json.Marshal(errMsg)
 	c.Send <- errBytes
+}
+
+// handleBotMessage handles messages sent to the AI bot
+func (c *Client) handleBotMessage(msg ChatMessage) {
+	botService := services.NewBotService()
+
+	// Save the user's message to database
+	userMessage := models.Message{
+		SenderID:    c.UserID,
+		RecipientID: &msg.To,
+		Content:     msg.Content,
+		Status:      models.MessageStatusSent,
+	}
+
+	if err := database.DB.Create(&userMessage).Error; err != nil {
+		c.sendError("Failed to save message")
+		return
+	}
+
+	// Send ack for user message
+	userMsgOut := ChatMessage{
+		Type:      "message",
+		ID:        userMessage.ID,
+		From:      c.UserID,
+		To:        msg.To,
+		Content:   msg.Content,
+		CreatedAt: userMessage.CreatedAt.Format(time.RFC3339),
+	}
+	userMsgBytes, _ := json.Marshal(userMsgOut)
+	c.Send <- userMsgBytes
+
+	ack := AckMessage{
+		Type:      "ack",
+		MessageID: userMessage.ID,
+		Status:    "delivered",
+	}
+	ackBytes, _ := json.Marshal(ack)
+	c.Send <- ackBytes
+
+	// Get conversation history for context
+	var historyMessages []models.Message
+	database.DB.Where(
+		"(sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?)",
+		c.UserID, services.BotUserID,
+		services.BotUserID, c.UserID,
+	).Order("created_at ASC").Limit(20).Find(&historyMessages)
+
+	// Convert to bot service message format
+	var history []services.Message
+	for _, m := range historyMessages {
+		role := "user"
+		if m.SenderID == services.BotUserID {
+			role = "assistant"
+		}
+		history = append(history, services.Message{
+			Role:    role,
+			Content: m.Content,
+		})
+	}
+
+	// Generate bot response asynchronously
+	go func() {
+		response, err := botService.GenerateResponse(msg.Content, history)
+		if err != nil {
+			log.Printf("Bot response error: %v", err)
+			return
+		}
+
+		// Save bot response to database
+		botMessage := models.Message{
+			SenderID:    services.BotUserID,
+			RecipientID: &c.UserID,
+			Content:     response.Content,
+			Status:      models.MessageStatusDelivered,
+		}
+
+		if err := database.DB.Create(&botMessage).Error; err != nil {
+			log.Printf("Failed to save bot message: %v", err)
+			return
+		}
+
+		// Send bot response to user
+		botMsgOut := ChatMessage{
+			Type:      "message",
+			ID:        botMessage.ID,
+			From:      services.BotUserID,
+			To:        c.UserID,
+			Content:   response.Content,
+			CreatedAt: botMessage.CreatedAt.Format(time.RFC3339),
+		}
+		botMsgBytes, _ := json.Marshal(botMsgOut)
+
+		// Send to user if still connected
+		c.Hub.SendToUser(c.UserID, botMsgBytes)
+	}()
 }

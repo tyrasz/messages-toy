@@ -180,6 +180,18 @@ class WebSocketService {
     _channel?.sink.add(jsonEncode(message));
   }
 
+  void sendGroupTyping({required String groupId, required bool typing}) {
+    if (!isConnected) return;
+
+    final message = {
+      'type': 'typing',
+      'group_id': groupId,
+      'typing': typing,
+    };
+
+    _channel?.sink.add(jsonEncode(message));
+  }
+
   void sendAck({required String messageId, required String status}) {
     if (!isConnected) return;
 

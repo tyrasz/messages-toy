@@ -112,6 +112,24 @@ func (h *Hub) SendToGroup(groupID string, excludeUserID string, message []byte) 
 	return sent
 }
 
+// BroadcastToGroup sends a JSON message to all group members
+func (h *Hub) BroadcastToGroup(groupID string, data interface{}) int {
+	msgBytes, err := json.Marshal(data)
+	if err != nil {
+		return 0
+	}
+	return h.SendToGroup(groupID, "", msgBytes)
+}
+
+// SendJSONToUser sends a JSON message to a specific user
+func (h *Hub) SendJSONToUser(userID string, data interface{}) bool {
+	msgBytes, err := json.Marshal(data)
+	if err != nil {
+		return false
+	}
+	return h.SendToUser(userID, msgBytes)
+}
+
 // GetGroupMemberIDs returns all member IDs of a group
 func (h *Hub) GetGroupMemberIDs(groupID string) []string {
 	var members []models.GroupMember
@@ -199,9 +217,11 @@ type ReplyPreview struct {
 }
 
 type TypingMessage struct {
-	Type   string `json:"type"`
-	To     string `json:"to"`
-	Typing bool   `json:"typing"`
+	Type    string `json:"type"`
+	To      string `json:"to,omitempty"`       // For DMs: recipient user ID
+	GroupID string `json:"group_id,omitempty"` // For groups: group ID
+	From    string `json:"from,omitempty"`     // Sender ID (for outgoing)
+	Typing  bool   `json:"typing"`
 }
 
 type PresenceMessage struct {

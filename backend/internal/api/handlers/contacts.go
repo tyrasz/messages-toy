@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"strings"
+
 	"github.com/gofiber/fiber/v2"
 	"messenger/internal/api/middleware"
 	"messenger/internal/database"
@@ -252,5 +254,88 @@ func (h *ContactsHandler) IsBlocked(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"blocked": blocked,
+	})
+}
+
+// SearchUsers searches for users by username or display name
+func (h *ContactsHandler) SearchUsers(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	query := c.Query("q")
+
+	if len(query) < 2 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Search query must be at least 2 characters",
+		})
+	}
+
+	limit := c.QueryInt("limit", 20)
+	if limit > 50 {
+		limit = 50
+	}
+	offset := c.QueryInt("offset", 0)
+
+	// Search for users matching the query (exclude self and blocked users)
+	var users []models.User
+
+	// Get IDs of users who have blocked the current user or vice versa
+	var blocks []models.Block
+	database.DB.Where("blocker_id = ? OR blocked_id = ?", userID, userID).Find(&blocks)
+
+	blockedIDs := make([]string, 0)
+	for _, block := range blocks {
+		if block.BlockerID == userID {
+			blockedIDs = append(blockedIDs, block.BlockedID)
+		} else {
+			blockedIDs = append(blockedIDs, block.BlockerID)
+		}
+	}
+
+	// Build query - search username and display_name, exclude self and blocked
+	// Use LOWER() for case-insensitive search (works with both PostgreSQL and SQLite)
+	lowerPattern := "%" + strings.ToLower(query) + "%"
+	db := database.DB.Where("id != ?", userID).
+		Where("(LOWER(username) LIKE ? OR LOWER(COALESCE(display_name, '')) LIKE ?)", lowerPattern, lowerPattern)
+
+	if len(blockedIDs) > 0 {
+		db = db.Where("id NOT IN ?", blockedIDs)
+	}
+
+	// Get total count
+	var total int64
+	db.Model(&models.User{}).Count(&total)
+
+	// Get results with pagination
+	if err := db.Limit(limit).Offset(offset).Find(&users).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to search users",
+		})
+	}
+
+	// Check which users are already contacts
+	var contactIDs []string
+	database.DB.Model(&models.Contact{}).Where("user_id = ?", userID).Pluck("contact_id", &contactIDs)
+	contactMap := make(map[string]bool)
+	for _, id := range contactIDs {
+		contactMap[id] = true
+	}
+
+	// Build response
+	response := make([]fiber.Map, len(users))
+	for i, user := range users {
+		online := false
+		if h.hub != nil {
+			online = h.hub.IsOnline(user.ID)
+		}
+		response[i] = fiber.Map{
+			"user":       user.ToResponse(online),
+			"is_contact": contactMap[user.ID],
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"users":  response,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
 	})
 }

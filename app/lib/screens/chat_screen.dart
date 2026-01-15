@@ -11,9 +11,19 @@ import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/blocks_provider.dart';
 import '../providers/starred_provider.dart';
+import '../providers/audio_provider.dart';
+import '../services/audio_service.dart';
 import '../widgets/media_bubbles.dart';
 import '../widgets/link_preview_widget.dart';
+import '../widgets/poll_create_dialog.dart';
+import '../widgets/poll_widget.dart';
+import '../widgets/pinned_message_banner.dart';
+import '../providers/poll_provider.dart';
+import '../providers/pinned_provider.dart';
+import '../models/poll.dart';
+import '../models/pinned_message.dart';
 import 'forward_message_screen.dart';
+import 'profile_screen.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final User user;
@@ -29,6 +39,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _scrollController = ScrollController();
   Timer? _typingTimer;
   bool _isTyping = false;
+  bool _hasText = false;
+  bool _isRecording = false;
   Message? _replyingTo;
 
   @override
@@ -37,8 +49,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // Load messages for this conversation
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(chatProvider.notifier).loadMessages(widget.user.id);
+      // Load pinned message
+      final currentUserId = ref.read(authProvider).user?.id;
+      if (currentUserId != null) {
+        ref.read(pinnedProvider.notifier).loadPinnedMessage(
+          otherUserId: widget.user.id,
+          currentUserId: currentUserId,
+        );
+      }
     });
-
+    // Track text changes for mic/send button toggle
     _messageController.addListener(_onTextChanged);
   }
 
@@ -48,10 +68,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _messageController.dispose();
     _scrollController.dispose();
     _typingTimer?.cancel();
+    // Cancel any ongoing recording
+    if (_isRecording) {
+      ref.read(audioServiceProvider).cancelRecording();
+    }
     super.dispose();
   }
 
   void _onTextChanged() {
+    // Update hasText state for mic/send button toggle
+    final hasText = _messageController.text.trim().isNotEmpty;
+    if (hasText != _hasText) {
+      setState(() => _hasText = hasText);
+    }
+
+    // Handle typing indicator
     if (_messageController.text.isNotEmpty && !_isTyping) {
       _isTyping = true;
       ref.read(chatProvider.notifier).sendTyping(widget.user.id, true);
@@ -64,6 +95,112 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ref.read(chatProvider.notifier).sendTyping(widget.user.id, false);
       }
     });
+  }
+
+  Future<void> _startRecording() async {
+    final audioService = ref.read(audioServiceProvider);
+
+    if (!await audioService.hasPermission()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Microphone permission required')),
+        );
+      }
+      return;
+    }
+
+    await audioService.startRecording();
+    setState(() => _isRecording = true);
+  }
+
+  Future<void> _stopAndSendRecording() async {
+    final audioService = ref.read(audioServiceProvider);
+    final path = await audioService.stopRecording();
+    setState(() => _isRecording = false);
+
+    if (path != null) {
+      await _uploadAndSendMedia(path, 'audio');
+    }
+  }
+
+  Future<void> _cancelRecording() async {
+    final audioService = ref.read(audioServiceProvider);
+    await audioService.cancelRecording();
+    setState(() => _isRecording = false);
+  }
+
+  Widget _buildRecordingUI() {
+    return Row(
+      children: [
+        // Cancel button
+        IconButton(
+          onPressed: _cancelRecording,
+          icon: const Icon(Icons.delete_outline, color: Colors.red),
+          tooltip: 'Cancel recording',
+        ),
+        // Recording indicator
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.red.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Row(
+              children: [
+                // Pulsing red dot
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0.5, end: 1.0),
+                  duration: const Duration(milliseconds: 500),
+                  builder: (context, value, child) {
+                    return Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.red.withOpacity(value),
+                      ),
+                    );
+                  },
+                  onEnd: () {},
+                ),
+                const SizedBox(width: 12),
+                // Recording duration
+                StreamBuilder<Duration>(
+                  stream: ref.read(audioServiceProvider).recordingDurationStream,
+                  builder: (context, snapshot) {
+                    final duration = snapshot.data ?? Duration.zero;
+                    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+                    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+                    return Text(
+                      '$minutes:$seconds',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                      ),
+                    );
+                  },
+                ),
+                const Spacer(),
+                const Text(
+                  'Recording...',
+                  style: TextStyle(
+                    color: Colors.red,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        // Send button
+        IconButton.filled(
+          onPressed: _stopAndSendRecording,
+          icon: const Icon(Icons.send),
+        ),
+      ],
+    );
   }
 
   void _sendMessage() {
@@ -195,10 +332,115 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 _pickAndSendAudio();
               },
             ),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.green[100],
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.poll, color: Colors.green[600]),
+              ),
+              title: const Text('Poll'),
+              subtitle: const Text('Create a poll'),
+              onTap: () {
+                Navigator.pop(context);
+                _showCreatePollDialog();
+              },
+            ),
           ],
         ),
       ),
     );
+  }
+
+  void _showCreatePollDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => PollCreateDialog(
+        recipientId: widget.user.id,
+        onSubmit: (question, options, multiSelect, anonymous) async {
+          final poll = await ref.read(pollProvider.notifier).createPoll(
+            question: question,
+            options: options,
+            multiSelect: multiSelect,
+            anonymous: anonymous,
+            recipientId: widget.user.id,
+          );
+          if (poll != null && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Poll created')),
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  void _scrollToMessage(String messageId) {
+    final chatState = ref.read(chatProvider);
+    final messages = chatState.messages[widget.user.id] ?? [];
+    final index = messages.indexWhere((m) => m.id == messageId);
+    if (index != -1) {
+      _scrollController.animateTo(
+        index * 80.0, // Approximate height
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  Future<void> _pinMessage(String messageId) async {
+    final currentUserId = ref.read(authProvider).user?.id;
+    if (currentUserId == null) return;
+
+    await ref.read(pinnedProvider.notifier).pinMessage(
+      messageId: messageId,
+      otherUserId: widget.user.id,
+      currentUserId: currentUserId,
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Message pinned')),
+      );
+    }
+  }
+
+  Future<void> _unpinMessage() async {
+    final currentUserId = ref.read(authProvider).user?.id;
+    if (currentUserId == null) return;
+
+    await ref.read(pinnedProvider.notifier).unpinMessage(
+      otherUserId: widget.user.id,
+      currentUserId: currentUserId,
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Message unpinned')),
+      );
+    }
+  }
+
+  Future<void> _archiveConversation() async {
+    try {
+      final apiService = ref.read(apiServiceProvider);
+      await apiService.archiveConversation(otherUserId: widget.user.id);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Chat archived')),
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to archive chat')),
+        );
+      }
+    }
   }
 
   Future<void> _pickAndSendImage() async {
@@ -401,9 +643,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final chatState = ref.watch(chatProvider);
     final authState = ref.watch(authProvider);
     final blocksState = ref.watch(blocksProvider);
+    final pinnedState = ref.watch(pinnedProvider);
     final messages = chatState.messages[widget.user.id] ?? [];
     final isTyping = chatState.typingStatus[widget.user.id] ?? false;
     final isBlocked = blocksState.isUserBlocked(widget.user.id);
+    final pinnedMessage = pinnedState.getForDm(widget.user.id, authState.user?.id ?? '');
 
     return Scaffold(
       appBar: AppBar(
@@ -444,14 +688,33 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ),
         actions: [
           PopupMenuButton<String>(
-            onSelected: (value) {
+            onSelected: (value) async {
               if (value == 'block') {
                 _handleBlockUser();
               } else if (value == 'disappearing') {
                 _showDisappearingSettings();
+              } else if (value == 'profile') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ProfileScreen(user: widget.user),
+                  ),
+                );
+              } else if (value == 'archive') {
+                await _archiveConversation();
               }
             },
             itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'profile',
+                child: Row(
+                  children: [
+                    Icon(Icons.person),
+                    SizedBox(width: 8),
+                    Text('View Profile'),
+                  ],
+                ),
+              ),
               const PopupMenuItem(
                 value: 'disappearing',
                 child: Row(
@@ -459,6 +722,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     Icon(Icons.timer),
                     SizedBox(width: 8),
                     Text('Disappearing messages'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'archive',
+                child: Row(
+                  children: [
+                    Icon(Icons.archive),
+                    SizedBox(width: 8),
+                    Text('Archive Chat'),
                   ],
                 ),
               ),
@@ -481,6 +754,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
       body: Column(
         children: [
+          // Pinned message banner
+          if (pinnedMessage != null)
+            PinnedMessageBanner(
+              pinned: pinnedMessage,
+              onTap: () => _scrollToMessage(pinnedMessage.messageId),
+              onUnpin: _unpinMessage,
+            ),
           // Messages list
           Expanded(
             child: messages.isEmpty
@@ -524,6 +804,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         otherUserName: widget.user.displayNameOrUsername,
                         onReply: () => _onReply(message),
                         onEdit: _onEdit,
+                        onPin: _pinMessage,
                       );
                     },
                   ),
@@ -646,41 +927,49 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ],
               ),
               child: SafeArea(
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.attach_file),
-                      onPressed: _showAttachmentMenu,
-                    ),
-                    Expanded(
-                      child: TextField(
-                        controller: _messageController,
-                        decoration: InputDecoration(
-                          hintText: 'Type a message...',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
-                            borderSide: BorderSide.none,
+                child: _isRecording
+                    ? _buildRecordingUI()
+                    : Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.attach_file),
+                            onPressed: _showAttachmentMenu,
                           ),
-                          filled: true,
-                          fillColor: Colors.grey[200],
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
+                          Expanded(
+                            child: TextField(
+                              controller: _messageController,
+                              decoration: InputDecoration(
+                                hintText: 'Type a message...',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(24),
+                                  borderSide: BorderSide.none,
+                                ),
+                                filled: true,
+                                fillColor: Colors.grey[200],
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 8,
+                                ),
+                              ),
+                              maxLines: 4,
+                              minLines: 1,
+                              textInputAction: TextInputAction.send,
+                              onSubmitted: (_) => _sendMessage(),
+                            ),
                           ),
-                        ),
-                        maxLines: 4,
-                        minLines: 1,
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => _sendMessage(),
+                          const SizedBox(width: 8),
+                          // Toggle between send and mic button
+                          _hasText
+                              ? IconButton.filled(
+                                  icon: const Icon(Icons.send),
+                                  onPressed: _sendMessage,
+                                )
+                              : IconButton.filled(
+                                  icon: const Icon(Icons.mic),
+                                  onPressed: _startRecording,
+                                ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton.filled(
-                      icon: const Icon(Icons.send),
-                      onPressed: _sendMessage,
-                    ),
-                  ],
-                ),
               ),
             ),
         ],
@@ -696,6 +985,7 @@ class _SwipeableMessageBubble extends ConsumerWidget {
   final String otherUserName;
   final VoidCallback onReply;
   final void Function(Message) onEdit;
+  final void Function(String) onPin;
 
   const _SwipeableMessageBubble({
     required this.message,
@@ -704,6 +994,7 @@ class _SwipeableMessageBubble extends ConsumerWidget {
     required this.otherUserName,
     required this.onReply,
     required this.onEdit,
+    required this.onPin,
   });
 
   void _showMessageOptions(BuildContext context, WidgetRef ref) {
@@ -777,6 +1068,14 @@ class _SwipeableMessageBubble extends ConsumerWidget {
                 },
               );
             }),
+            ListTile(
+              leading: const Icon(Icons.push_pin),
+              title: const Text('Pin'),
+              onTap: () {
+                Navigator.pop(context);
+                onPin(message.id);
+              },
+            ),
             if (isMe && message.content != null) ...[
               ListTile(
                 leading: const Icon(Icons.edit),

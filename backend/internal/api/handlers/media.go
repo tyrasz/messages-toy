@@ -18,12 +18,16 @@ import (
 type MediaHandler struct {
 	hub               *websocket.Hub
 	moderationService *services.ModerationService
+	videoService      *services.VideoService
+	documentService   *services.DocumentService
 }
 
 func NewMediaHandler(hub *websocket.Hub) *MediaHandler {
 	return &MediaHandler{
 		hub:               hub,
 		moderationService: services.NewModerationService(),
+		videoService:      services.NewVideoService(),
+		documentService:   services.NewDocumentService(),
 	}
 }
 
@@ -120,19 +124,24 @@ func (h *MediaHandler) processModeration(media *models.Media) {
 		// Scan images with GCP Vision
 		result, err = h.moderationService.ScanImage(media.StoragePath)
 	case models.MediaTypeVideo:
-		// For videos, we could extract frames and scan them
-		// For now, auto-approve with scan note
+		// Extract video metadata and thumbnail
+		h.processVideoMetadata(media)
+		// For videos, auto-approve (could implement frame scanning later)
 		result = &services.ScanResult{
 			Status:    models.MediaStatusApproved,
-			RawResult: "Video auto-approved (frame scanning not implemented)",
+			RawResult: "Video auto-approved",
 		}
 	case models.MediaTypeAudio:
+		// Extract audio metadata
+		h.processAudioMetadata(media)
 		// For audio, auto-approve (could implement speech-to-text moderation later)
 		result = &services.ScanResult{
 			Status:    models.MediaStatusApproved,
 			RawResult: "Audio auto-approved",
 		}
 	case models.MediaTypeDocument:
+		// Extract document metadata
+		h.processDocumentMetadata(media)
 		// For documents, auto-approve (could implement PDF preview scanning later)
 		result = &services.ScanResult{
 			Status:    models.MediaStatusApproved,
@@ -275,4 +284,89 @@ func getMaxSize(mediaType models.MediaType) int64 {
 	default:
 		return MaxImageSize // Default to image size
 	}
+}
+
+// processVideoMetadata extracts and stores video metadata
+func (h *MediaHandler) processVideoMetadata(media *models.Media) {
+	if !h.videoService.IsAvailable() {
+		return
+	}
+
+	metadata, err := h.videoService.ProcessVideo(media.StoragePath, media.Filename)
+	if err != nil {
+		return
+	}
+
+	updates := map[string]interface{}{}
+
+	if metadata.Duration > 0 {
+		updates["duration"] = metadata.Duration
+	}
+	if metadata.Width > 0 {
+		updates["width"] = metadata.Width
+	}
+	if metadata.Height > 0 {
+		updates["height"] = metadata.Height
+	}
+	if metadata.ThumbnailPath != "" {
+		updates["thumbnail_path"] = metadata.ThumbnailPath
+		updates["thumbnail_url"] = fmt.Sprintf("/media/%s/thumbnail", media.ID)
+	}
+
+	if len(updates) > 0 {
+		database.DB.Model(media).Updates(updates)
+	}
+}
+
+// processAudioMetadata extracts and stores audio metadata
+func (h *MediaHandler) processAudioMetadata(media *models.Media) {
+	if !h.videoService.IsAvailable() {
+		return
+	}
+
+	metadata, err := h.videoService.ExtractAudioMetadata(media.StoragePath)
+	if err != nil {
+		return
+	}
+
+	if metadata.Duration > 0 {
+		database.DB.Model(media).Update("duration", metadata.Duration)
+	}
+}
+
+// processDocumentMetadata extracts and stores document metadata
+func (h *MediaHandler) processDocumentMetadata(media *models.Media) {
+	// Only process PDFs for now
+	if !strings.Contains(media.ContentType, "pdf") {
+		return
+	}
+
+	metadata, err := h.documentService.ExtractPDFMetadata(media.StoragePath)
+	if err != nil {
+		return
+	}
+
+	if metadata.PageCount > 0 {
+		database.DB.Model(media).Update("page_count", metadata.PageCount)
+	}
+}
+
+// GetThumbnail serves the thumbnail for a media item
+func (h *MediaHandler) GetThumbnail(c *fiber.Ctx) error {
+	mediaID := c.Params("id")
+
+	var media models.Media
+	if err := database.DB.First(&media, "id = ?", mediaID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Media not found",
+		})
+	}
+
+	if media.ThumbnailPath == "" {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "No thumbnail available",
+		})
+	}
+
+	return c.SendFile(media.ThumbnailPath)
 }

@@ -42,12 +42,21 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	blocks.Delete("/:userId", contactsHandler.Unblock)
 	blocks.Get("/:userId", contactsHandler.IsBlocked)
 
+	// Users (search)
+	users := protected.Group("/users")
+	users.Get("/search", contactsHandler.SearchUsers)
+
 	// Messages
-	messagesHandler := handlers.NewMessagesHandler()
+	messagesHandler := handlers.NewMessagesHandler(hub)
 	messages := protected.Group("/messages")
 	messages.Get("/conversations", messagesHandler.GetConversations)
 	messages.Get("/search", messagesHandler.Search)
+	messages.Get("/export", messagesHandler.Export)
 	messages.Get("/:userId", messagesHandler.GetHistory)
+	messages.Post("/:id/forward", messagesHandler.Forward)
+	messages.Get("/:id/reactions", messagesHandler.GetReactions)
+	messages.Post("/:id/reactions", messagesHandler.AddReaction)
+	messages.Delete("/:id/reactions", messagesHandler.RemoveReaction)
 
 	// Groups
 	groupsHandler := handlers.NewGroupsHandler(hub)
@@ -65,6 +74,7 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	media := protected.Group("/media")
 	media.Post("/upload", mediaHandler.Upload)
 	media.Get("/:id", mediaHandler.Get)
+	media.Get("/:id/thumbnail", mediaHandler.GetThumbnail)
 
 	// Notifications (push)
 	notificationsHandler := handlers.NewNotificationsHandler()
@@ -96,11 +106,60 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	settings.Post("/disappearing", settingsHandler.SetDisappearingMessages)
 	settings.Post("/mute", settingsHandler.MuteConversation)
 
+	// Polls
+	pollHandler := handlers.NewPollHandler(hub)
+	polls := protected.Group("/polls")
+	polls.Post("/", pollHandler.Create)
+	polls.Get("/:id", pollHandler.Get)
+	polls.Post("/:id/vote", pollHandler.Vote)
+	polls.Post("/:id/close", pollHandler.Close)
+
+	// Pinned messages
+	pinnedHandler := handlers.NewPinnedHandler(hub)
+	pinned := protected.Group("/pinned")
+	pinned.Post("/", pinnedHandler.Pin)
+	pinned.Delete("/", pinnedHandler.Unpin)
+	pinned.Get("/", pinnedHandler.Get)
+
 	// Admin routes (for moderation review)
 	adminHandler := handlers.NewAdminHandler()
 	admin := protected.Group("/admin")
 	admin.Get("/review", adminHandler.GetPendingReview)
 	admin.Post("/review/:id", adminHandler.Review)
+
+	// Profile routes
+	profileHandler := handlers.NewProfileHandler(hub)
+	profile := protected.Group("/profile")
+	profile.Get("/", profileHandler.GetProfile)
+	profile.Put("/", profileHandler.UpdateProfile)
+	profile.Get("/:userId", profileHandler.GetUserProfile)
+
+	// Archive routes
+	archiveHandler := handlers.NewArchiveHandler()
+	archive := protected.Group("/archive")
+	archive.Post("/", archiveHandler.Archive)
+	archive.Delete("/", archiveHandler.Unarchive)
+	archive.Get("/", archiveHandler.List)
+	archive.Get("/check", archiveHandler.IsArchived)
+
+	// Read receipts
+	readReceiptHandler := handlers.NewReadReceiptHandler(hub)
+	receipts := protected.Group("/receipts")
+	receipts.Post("/read", readReceiptHandler.MarkRead)
+	receipts.Get("/:messageId", readReceiptHandler.GetReceipts)
+	receipts.Get("/unread", readReceiptHandler.GetUnreadCount)
+
+	// Broadcast lists
+	broadcastHandler := handlers.NewBroadcastHandler(hub)
+	broadcast := protected.Group("/broadcast")
+	broadcast.Post("/", broadcastHandler.Create)
+	broadcast.Get("/", broadcastHandler.List)
+	broadcast.Get("/:id", broadcastHandler.Get)
+	broadcast.Put("/:id", broadcastHandler.Update)
+	broadcast.Delete("/:id", broadcastHandler.Delete)
+	broadcast.Post("/:id/send", broadcastHandler.Send)
+	broadcast.Post("/:id/recipients", broadcastHandler.AddRecipient)
+	broadcast.Delete("/:id/recipients/:recipientId", broadcastHandler.RemoveRecipient)
 
 	// WebSocket endpoint
 	app.Use("/ws", func(c *fiber.Ctx) error {

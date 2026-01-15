@@ -7,12 +7,14 @@ import 'auth_provider.dart';
 class GroupsState {
   final List<Group> groups;
   final Map<String, List<Message>> messages; // keyed by group ID
+  final Map<String, Set<String>> typingUsers; // group ID -> set of user IDs currently typing
   final bool isLoading;
   final String? error;
 
   GroupsState({
     this.groups = const [],
     this.messages = const {},
+    this.typingUsers = const {},
     this.isLoading = false,
     this.error,
   });
@@ -20,15 +22,22 @@ class GroupsState {
   GroupsState copyWith({
     List<Group>? groups,
     Map<String, List<Message>>? messages,
+    Map<String, Set<String>>? typingUsers,
     bool? isLoading,
     String? error,
   }) {
     return GroupsState(
       groups: groups ?? this.groups,
       messages: messages ?? this.messages,
+      typingUsers: typingUsers ?? this.typingUsers,
       isLoading: isLoading ?? this.isLoading,
       error: error,
     );
+  }
+
+  /// Get the set of users currently typing in a group
+  Set<String> getTypingUsers(String groupId) {
+    return typingUsers[groupId] ?? {};
   }
 }
 
@@ -174,6 +183,37 @@ class GroupsNotifier extends StateNotifier<GroupsState> {
     }
 
     state = state.copyWith(messages: newMessages);
+  }
+
+  /// Handle typing indicator for groups
+  void handleGroupTyping({
+    required String groupId,
+    required String userId,
+    required bool isTyping,
+  }) {
+    final currentTypingUsers = Map<String, Set<String>>.from(state.typingUsers);
+    final groupTyping = Set<String>.from(currentTypingUsers[groupId] ?? {});
+
+    if (isTyping) {
+      groupTyping.add(userId);
+    } else {
+      groupTyping.remove(userId);
+    }
+
+    if (groupTyping.isEmpty) {
+      currentTypingUsers.remove(groupId);
+    } else {
+      currentTypingUsers[groupId] = groupTyping;
+    }
+
+    state = state.copyWith(typingUsers: currentTypingUsers);
+  }
+
+  /// Clear all typing indicators for a group (useful when leaving chat)
+  void clearGroupTyping(String groupId) {
+    final currentTypingUsers = Map<String, Set<String>>.from(state.typingUsers);
+    currentTypingUsers.remove(groupId);
+    state = state.copyWith(typingUsers: currentTypingUsers);
   }
 }
 

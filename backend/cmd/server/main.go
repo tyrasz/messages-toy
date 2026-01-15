@@ -35,11 +35,20 @@ func main() {
 		&models.LinkPreview{},
 		&models.StarredMessage{},
 		&models.ConversationSettings{},
+		&models.Poll{},
+		&models.PollOption{},
+		&models.PollVote{},
+		&models.PinnedMessage{},
+		&models.MessageReadReceipt{},
+		&models.ArchivedConversation{},
 	)
 
 	// Create WebSocket hub
 	hub := websocket.NewHub()
 	go hub.Run()
+
+	// Create bot user if not exists
+	createBotUser()
 
 	// Start message cleanup service (for disappearing messages)
 	cleanupService := services.NewMessageCleanupService(database.DB, 1*time.Minute)
@@ -98,5 +107,26 @@ func main() {
 	log.Printf("Server starting on port %s", port)
 	if err := app.Listen(":" + port); err != nil {
 		log.Fatal("Failed to start server:", err)
+	}
+}
+
+// createBotUser ensures the bot user exists in the database
+func createBotUser() {
+	var existingBot models.User
+	result := database.DB.Where("id = ?", services.BotUserID).First(&existingBot)
+
+	if result.Error != nil {
+		// Create bot user
+		botUser := models.User{
+			ID:           services.BotUserID,
+			Username:     services.BotUsername,
+			DisplayName:  services.BotDisplayName,
+			PasswordHash: "", // Bot doesn't need a password
+		}
+		if err := database.DB.Create(&botUser).Error; err != nil {
+			log.Printf("Warning: Could not create bot user: %v", err)
+		} else {
+			log.Println("Bot user created successfully")
+		}
 	}
 }

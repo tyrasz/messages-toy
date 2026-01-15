@@ -6,11 +6,19 @@ import '../providers/contacts_provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/groups_provider.dart';
 import '../models/contact.dart';
+import '../models/user.dart';
 import 'chat_screen.dart';
 import 'group_chat_screen.dart';
 import 'create_group_screen.dart';
 import 'search_screen.dart';
 import 'starred_messages_screen.dart';
+import 'profile_screen.dart';
+import 'archived_screen.dart';
+
+// Bot user constants (must match backend)
+const String botUserId = 'bot-assistant';
+const String botUsername = 'assistant';
+const String botDisplayName = 'AI Assistant';
 
 class ContactsScreen extends ConsumerStatefulWidget {
   const ContactsScreen({super.key});
@@ -40,6 +48,21 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen>
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  void _openBotChat() {
+    final botUser = User(
+      id: botUserId,
+      username: botUsername,
+      displayName: botDisplayName,
+      online: true, // Bot is always "online"
+    );
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatScreen(user: botUser),
+      ),
+    );
   }
 
   void _showAddContactDialog() {
@@ -127,6 +150,23 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen>
               PopupMenuItem(
                 child: const Row(
                   children: [
+                    Icon(Icons.person),
+                    SizedBox(width: 12),
+                    Text('My Profile'),
+                  ],
+                ),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ProfileScreen(),
+                    ),
+                  );
+                },
+              ),
+              PopupMenuItem(
+                child: const Row(
+                  children: [
                     Icon(Icons.star, color: Colors.amber),
                     SizedBox(width: 12),
                     Text('Starred Messages'),
@@ -142,13 +182,42 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen>
                 },
               ),
               PopupMenuItem(
-                child: const Text('Settings'),
+                child: const Row(
+                  children: [
+                    Icon(Icons.archive),
+                    SizedBox(width: 12),
+                    Text('Archived Chats'),
+                  ],
+                ),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ArchivedScreen(),
+                    ),
+                  );
+                },
+              ),
+              PopupMenuItem(
+                child: const Row(
+                  children: [
+                    Icon(Icons.settings),
+                    SizedBox(width: 12),
+                    Text('Settings'),
+                  ],
+                ),
                 onTap: () {
                   // TODO: Navigate to settings
                 },
               ),
               PopupMenuItem(
-                child: const Text('Logout'),
+                child: const Row(
+                  children: [
+                    Icon(Icons.logout, color: Colors.red),
+                    SizedBox(width: 12),
+                    Text('Logout', style: TextStyle(color: Colors.red)),
+                  ],
+                ),
                 onTap: () {
                   ref.read(authProvider.notifier).logout();
                 },
@@ -178,37 +247,20 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen>
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (chatState.conversations.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.chat_bubble_outline,
-              size: 64,
-              color: Colors.grey[400],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No conversations yet',
-              style: TextStyle(color: Colors.grey[600]),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Add a contact to start chatting',
-              style: TextStyle(color: Colors.grey[500], fontSize: 12),
-            ),
-          ],
-        ),
-      );
-    }
+    // Always show bot at the top, even if no conversations
+    final hasConversations = chatState.conversations.isNotEmpty;
 
     return RefreshIndicator(
       onRefresh: () => ref.read(chatProvider.notifier).loadConversations(),
       child: ListView.builder(
-        itemCount: chatState.conversations.length,
+        itemCount: hasConversations ? chatState.conversations.length + 1 : 1,
         itemBuilder: (context, index) {
-          final conversation = chatState.conversations[index];
+          // First item is always the bot
+          if (index == 0) {
+            return _buildBotTile();
+          }
+
+          final conversation = chatState.conversations[index - 1];
           return ListTile(
             leading: CircleAvatar(
               child: Text(
@@ -266,6 +318,47 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen>
             },
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildBotTile() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.purple.withOpacity(0.05),
+        border: Border(
+          bottom: BorderSide(color: Colors.grey.shade200),
+        ),
+      ),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: Colors.purple,
+          child: const Icon(Icons.smart_toy, color: Colors.white),
+        ),
+        title: const Text(
+          botDisplayName,
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: const Text(
+          'Chat with AI - always available',
+          style: TextStyle(fontSize: 12),
+        ),
+        trailing: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.green,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Text(
+            'AI',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        onTap: _openBotChat,
       ),
     );
   }

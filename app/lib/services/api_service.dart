@@ -9,6 +9,8 @@ import '../models/block.dart';
 import '../models/search_result.dart';
 import '../models/link_preview.dart';
 import '../models/starred_message.dart';
+import '../models/poll.dart';
+import '../models/pinned_message.dart';
 
 class ApiService {
   static const String baseUrl = 'http://localhost:8080/api';
@@ -347,5 +349,163 @@ class ApiService {
       if (groupId != null) 'group_id': groupId,
       'hours': hours,
     });
+  }
+
+  // Poll endpoints
+  Future<Poll> createPoll({
+    required String question,
+    required List<String> options,
+    bool multiSelect = false,
+    bool anonymous = false,
+    String? groupId,
+    String? recipientId,
+  }) async {
+    final response = await _dio.post('/polls', data: {
+      'question': question,
+      'options': options,
+      'multi_select': multiSelect,
+      'anonymous': anonymous,
+      if (groupId != null) 'group_id': groupId,
+      if (recipientId != null) 'recipient_id': recipientId,
+    });
+    return Poll.fromJson(response.data);
+  }
+
+  Future<Poll> getPoll(String pollId) async {
+    final response = await _dio.get('/polls/$pollId');
+    return Poll.fromJson(response.data);
+  }
+
+  Future<Poll> votePoll(String pollId, String optionId) async {
+    final response = await _dio.post('/polls/$pollId/vote', data: {
+      'option_id': optionId,
+    });
+    return Poll.fromJson(response.data);
+  }
+
+  Future<Poll> closePoll(String pollId) async {
+    final response = await _dio.post('/polls/$pollId/close');
+    return Poll.fromJson(response.data);
+  }
+
+  // Pinned message endpoints
+  Future<PinnedMessage> pinMessage({
+    required String messageId,
+    String? groupId,
+    String? otherUserId,
+  }) async {
+    final response = await _dio.post('/pinned', data: {
+      'message_id': messageId,
+      if (groupId != null) 'group_id': groupId,
+      if (otherUserId != null) 'other_user_id': otherUserId,
+    });
+    return PinnedMessage.fromJson(response.data);
+  }
+
+  Future<void> unpinMessage({
+    String? groupId,
+    String? otherUserId,
+  }) async {
+    final params = <String, dynamic>{};
+    if (groupId != null) params['group_id'] = groupId;
+    if (otherUserId != null) params['other_user_id'] = otherUserId;
+    await _dio.delete('/pinned', queryParameters: params);
+  }
+
+  Future<PinnedMessage?> getPinnedMessage({
+    String? groupId,
+    String? otherUserId,
+  }) async {
+    try {
+      final params = <String, dynamic>{};
+      if (groupId != null) params['group_id'] = groupId;
+      if (otherUserId != null) params['other_user_id'] = otherUserId;
+      final response = await _dio.get('/pinned', queryParameters: params);
+      return PinnedMessage.fromJson(response.data);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Profile endpoints
+  Future<User> getProfile() async {
+    final response = await _dio.get('/profile');
+    return User.fromJson(response.data);
+  }
+
+  Future<User> getUserProfile(String userId) async {
+    final response = await _dio.get('/profile/$userId');
+    return User.fromJson(response.data);
+  }
+
+  Future<User> updateProfile({
+    String? displayName,
+    String? about,
+    String? statusEmoji,
+  }) async {
+    final response = await _dio.put('/profile', data: {
+      if (displayName != null) 'display_name': displayName,
+      if (about != null) 'about': about,
+      if (statusEmoji != null) 'status_emoji': statusEmoji,
+    });
+    return User.fromJson(response.data);
+  }
+
+  // Archive endpoints
+  Future<void> archiveConversation({
+    String? otherUserId,
+    String? groupId,
+  }) async {
+    await _dio.post('/archive', data: {
+      if (otherUserId != null) 'other_user_id': otherUserId,
+      if (groupId != null) 'group_id': groupId,
+    });
+  }
+
+  Future<void> unarchiveConversation({
+    String? otherUserId,
+    String? groupId,
+  }) async {
+    final params = <String, dynamic>{};
+    if (otherUserId != null) params['other_user_id'] = otherUserId;
+    if (groupId != null) params['group_id'] = groupId;
+    await _dio.delete('/archive', queryParameters: params);
+  }
+
+  Future<List<Map<String, dynamic>>> getArchivedConversations() async {
+    final response = await _dio.get('/archive');
+    return List<Map<String, dynamic>>.from(response.data['archived'] ?? []);
+  }
+
+  Future<bool> isConversationArchived({
+    String? otherUserId,
+    String? groupId,
+  }) async {
+    final params = <String, dynamic>{};
+    if (otherUserId != null) params['other_user_id'] = otherUserId;
+    if (groupId != null) params['group_id'] = groupId;
+    final response = await _dio.get('/archive/check', queryParameters: params);
+    return response.data['archived'] as bool;
+  }
+
+  // Read receipts endpoints
+  Future<void> markMessagesAsRead(List<String> messageIds, {String? groupId}) async {
+    await _dio.post('/receipts/read', data: {
+      'message_ids': messageIds,
+      if (groupId != null) 'group_id': groupId,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getReadReceipts(String messageId) async {
+    final response = await _dio.get('/receipts/$messageId');
+    return List<Map<String, dynamic>>.from(response.data['receipts'] ?? []);
+  }
+
+  Future<int> getUnreadCount({String? otherUserId, String? groupId}) async {
+    final params = <String, dynamic>{};
+    if (otherUserId != null) params['other_user_id'] = otherUserId;
+    if (groupId != null) params['group_id'] = groupId;
+    final response = await _dio.get('/receipts/unread', queryParameters: params);
+    return response.data['unread_count'] as int;
   }
 }

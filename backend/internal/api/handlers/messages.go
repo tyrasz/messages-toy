@@ -1,18 +1,24 @@
 package handlers
 
 import (
+	"encoding/json"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"messenger/internal/api/middleware"
 	"messenger/internal/database"
 	"messenger/internal/models"
+	"messenger/internal/services"
+	"messenger/internal/websocket"
 )
 
-type MessagesHandler struct{}
+type MessagesHandler struct {
+	hub *websocket.Hub
+}
 
-func NewMessagesHandler() *MessagesHandler {
-	return &MessagesHandler{}
+func NewMessagesHandler(hub *websocket.Hub) *MessagesHandler {
+	return &MessagesHandler{hub: hub}
 }
 
 func (h *MessagesHandler) GetHistory(c *fiber.Ctx) error {
@@ -206,4 +212,711 @@ func (h *MessagesHandler) Search(c *fiber.Ctx) error {
 		"limit":   limit,
 		"offset":  offset,
 	})
+}
+
+type ForwardMessageRequest struct {
+	UserIDs  []string `json:"user_ids,omitempty"`
+	GroupIDs []string `json:"group_ids,omitempty"`
+}
+
+// Forward forwards a message to one or more users/groups
+func (h *MessagesHandler) Forward(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	messageID := c.Params("id")
+
+	var req ForwardMessageRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	if len(req.UserIDs) == 0 && len(req.GroupIDs) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "At least one user_id or group_id is required",
+		})
+	}
+
+	// Find the original message
+	var originalMessage models.Message
+	if err := database.DB.Preload("Media").First(&originalMessage, "id = ?", messageID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Message not found",
+		})
+	}
+
+	// Check if user has access to this message
+	if originalMessage.GroupID != nil {
+		// Group message - check membership
+		var membership models.GroupMember
+		if err := database.DB.Where("group_id = ? AND user_id = ?", *originalMessage.GroupID, userID).First(&membership).Error; err != nil {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "You don't have access to this message",
+			})
+		}
+	} else {
+		// DM - must be sender or recipient
+		if originalMessage.SenderID != userID && (originalMessage.RecipientID == nil || *originalMessage.RecipientID != userID) {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "You don't have access to this message",
+			})
+		}
+	}
+
+	// Check if message is deleted
+	if originalMessage.IsDeleted() {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Cannot forward a deleted message",
+		})
+	}
+
+	// Get original sender's name for attribution
+	var originalSender models.User
+	if err := database.DB.First(&originalSender, "id = ?", originalMessage.SenderID).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to get original sender",
+		})
+	}
+	forwardedFrom := originalSender.DisplayName
+	if forwardedFrom == "" {
+		forwardedFrom = originalSender.Username
+	}
+
+	forwardedMessages := make([]fiber.Map, 0)
+	var forwardErrors []string
+
+	// Forward to users (DMs)
+	for _, targetUserID := range req.UserIDs {
+		if targetUserID == userID {
+			continue // Skip self
+		}
+
+		// Check blocking
+		if models.IsEitherBlocked(database.DB, userID, targetUserID) {
+			forwardErrors = append(forwardErrors, "Cannot forward to blocked user")
+			continue
+		}
+
+		// Verify user exists
+		var targetUser models.User
+		if err := database.DB.First(&targetUser, "id = ?", targetUserID).Error; err != nil {
+			forwardErrors = append(forwardErrors, "User not found: "+targetUserID)
+			continue
+		}
+
+		// Create forwarded message
+		message := &models.Message{
+			SenderID:      userID,
+			RecipientID:   &targetUserID,
+			Content:       originalMessage.Content,
+			MediaID:       originalMessage.MediaID,
+			ForwardedFrom: &forwardedFrom,
+			Status:        models.MessageStatusSent,
+		}
+
+		if err := database.DB.Create(message).Error; err != nil {
+			forwardErrors = append(forwardErrors, "Failed to forward to user")
+			continue
+		}
+
+		// Send via WebSocket
+		if h.hub != nil && h.hub.IsOnline(targetUserID) {
+			outMsg := map[string]interface{}{
+				"type":           "message",
+				"id":             message.ID,
+				"from":           userID,
+				"to":             targetUserID,
+				"content":        message.Content,
+				"media_id":       message.MediaID,
+				"forwarded_from": forwardedFrom,
+				"created_at":     message.CreatedAt.Format(time.RFC3339),
+			}
+			msgBytes, _ := json.Marshal(outMsg)
+			h.hub.SendToUser(targetUserID, msgBytes)
+
+			// Update to delivered
+			database.DB.Model(message).Update("status", models.MessageStatusDelivered)
+		} else {
+			// Push notification for offline user
+			services.PushMessageToOfflineUser(database.DB, targetUserID, userID, message.Content, false, targetUserID)
+		}
+
+		forwardedMessages = append(forwardedMessages, fiber.Map{
+			"id":         message.ID,
+			"type":       "dm",
+			"to_user_id": targetUserID,
+			"created_at": message.CreatedAt,
+		})
+	}
+
+	// Forward to groups
+	for _, groupID := range req.GroupIDs {
+		// Check membership
+		var membership models.GroupMember
+		if err := database.DB.Where("group_id = ? AND user_id = ?", groupID, userID).First(&membership).Error; err != nil {
+			forwardErrors = append(forwardErrors, "Not a member of group: "+groupID)
+			continue
+		}
+
+		// Create forwarded message
+		message := &models.Message{
+			SenderID:      userID,
+			GroupID:       &groupID,
+			Content:       originalMessage.Content,
+			MediaID:       originalMessage.MediaID,
+			ForwardedFrom: &forwardedFrom,
+			Status:        models.MessageStatusSent,
+		}
+
+		if err := database.DB.Create(message).Error; err != nil {
+			forwardErrors = append(forwardErrors, "Failed to forward to group")
+			continue
+		}
+
+		// Broadcast to group members via WebSocket
+		if h.hub != nil {
+			outMsg := map[string]interface{}{
+				"type":           "message",
+				"id":             message.ID,
+				"from":           userID,
+				"group_id":       groupID,
+				"content":        message.Content,
+				"media_id":       message.MediaID,
+				"forwarded_from": forwardedFrom,
+				"created_at":     message.CreatedAt.Format(time.RFC3339),
+			}
+			msgBytes, _ := json.Marshal(outMsg)
+			sentCount := h.hub.SendToGroup(groupID, userID, msgBytes)
+
+			if sentCount > 0 {
+				database.DB.Model(message).Update("status", models.MessageStatusDelivered)
+			}
+
+			// Push to offline group members
+			offlineMembers := h.hub.GetOfflineGroupMemberIDs(groupID, userID)
+			for _, memberID := range offlineMembers {
+				services.PushMessageToOfflineUser(database.DB, memberID, userID, message.Content, true, groupID)
+			}
+		}
+
+		forwardedMessages = append(forwardedMessages, fiber.Map{
+			"id":         message.ID,
+			"type":       "group",
+			"group_id":   groupID,
+			"created_at": message.CreatedAt,
+		})
+	}
+
+	response := fiber.Map{
+		"success":            len(forwardedMessages) > 0,
+		"forwarded_count":    len(forwardedMessages),
+		"forwarded_messages": forwardedMessages,
+		"original_message": fiber.Map{
+			"id":      originalMessage.ID,
+			"content": originalMessage.Content,
+		},
+	}
+
+	if len(forwardErrors) > 0 {
+		response["errors"] = forwardErrors
+	}
+
+	return c.JSON(response)
+}
+
+// ExportMessage represents a message in the export format
+type ExportMessage struct {
+	ID            string     `json:"id"`
+	SenderID      string     `json:"sender_id"`
+	SenderName    string     `json:"sender_name"`
+	Content       string     `json:"content"`
+	MediaID       *string    `json:"media_id,omitempty"`
+	MediaURL      string     `json:"media_url,omitempty"`
+	MediaType     string     `json:"media_type,omitempty"`
+	ForwardedFrom *string    `json:"forwarded_from,omitempty"`
+	ReplyToID     *string    `json:"reply_to_id,omitempty"`
+	EditedAt      *time.Time `json:"edited_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+// ExportConversation represents the full export data
+type ExportConversation struct {
+	ExportedAt    time.Time       `json:"exported_at"`
+	ExportedBy    string          `json:"exported_by"`
+	Type          string          `json:"type"` // "dm" or "group"
+	Participants  []ExportUser    `json:"participants"`
+	GroupName     string          `json:"group_name,omitempty"`
+	MessageCount  int             `json:"message_count"`
+	DateRange     ExportDateRange `json:"date_range"`
+	Messages      []ExportMessage `json:"messages"`
+}
+
+type ExportUser struct {
+	ID          string `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name,omitempty"`
+}
+
+type ExportDateRange struct {
+	From *time.Time `json:"from,omitempty"`
+	To   *time.Time `json:"to,omitempty"`
+}
+
+// Export exports a conversation (DM or group) in the requested format
+func (h *MessagesHandler) Export(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	format := c.Query("format", "json") // json or txt
+
+	// Get conversation identifiers
+	otherUserID := c.Query("user_id")
+	groupID := c.Query("group_id")
+
+	if otherUserID == "" && groupID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Either user_id or group_id is required",
+		})
+	}
+
+	if otherUserID != "" && groupID != "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Cannot specify both user_id and group_id",
+		})
+	}
+
+	// Parse date range
+	var fromDate, toDate *time.Time
+	if from := c.Query("from"); from != "" {
+		if t, err := time.Parse("2006-01-02", from); err == nil {
+			fromDate = &t
+		}
+	}
+	if to := c.Query("to"); to != "" {
+		if t, err := time.Parse("2006-01-02", to); err == nil {
+			endOfDay := t.Add(24*time.Hour - time.Second)
+			toDate = &endOfDay
+		}
+	}
+
+	var messages []models.Message
+	var export ExportConversation
+	export.ExportedAt = time.Now()
+	export.DateRange = ExportDateRange{From: fromDate, To: toDate}
+
+	// Get exporter info
+	var exporter models.User
+	database.DB.First(&exporter, "id = ?", userID)
+	export.ExportedBy = exporter.Username
+
+	if groupID != "" {
+		// Export group conversation
+		var membership models.GroupMember
+		if err := database.DB.Where("group_id = ? AND user_id = ?", groupID, userID).First(&membership).Error; err != nil {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "You are not a member of this group",
+			})
+		}
+
+		var group models.Group
+		if err := database.DB.First(&group, "id = ?", groupID).Error; err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "Group not found",
+			})
+		}
+
+		export.Type = "group"
+		export.GroupName = group.Name
+
+		// Get group members as participants
+		var members []models.GroupMember
+		database.DB.Preload("User").Where("group_id = ?", groupID).Find(&members)
+		for _, m := range members {
+			export.Participants = append(export.Participants, ExportUser{
+				ID:          m.User.ID,
+				Username:    m.User.Username,
+				DisplayName: m.User.DisplayName,
+			})
+		}
+
+		// Build query for messages
+		query := database.DB.Preload("Media").Where("group_id = ? AND deleted_at IS NULL", groupID)
+		if fromDate != nil {
+			query = query.Where("created_at >= ?", *fromDate)
+		}
+		if toDate != nil {
+			query = query.Where("created_at <= ?", *toDate)
+		}
+		query.Order("created_at ASC").Find(&messages)
+
+	} else {
+		// Export DM conversation
+		var otherUser models.User
+		if err := database.DB.First(&otherUser, "id = ?", otherUserID).Error; err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "User not found",
+			})
+		}
+
+		export.Type = "dm"
+		export.Participants = []ExportUser{
+			{ID: exporter.ID, Username: exporter.Username, DisplayName: exporter.DisplayName},
+			{ID: otherUser.ID, Username: otherUser.Username, DisplayName: otherUser.DisplayName},
+		}
+
+		// Build query for messages
+		query := database.DB.Preload("Media").Where(
+			"group_id IS NULL AND deleted_at IS NULL AND ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))",
+			userID, otherUserID, otherUserID, userID,
+		)
+		if fromDate != nil {
+			query = query.Where("created_at >= ?", *fromDate)
+		}
+		if toDate != nil {
+			query = query.Where("created_at <= ?", *toDate)
+		}
+		query.Order("created_at ASC").Find(&messages)
+	}
+
+	// Build username lookup for message senders
+	usernames := make(map[string]string)
+	for _, p := range export.Participants {
+		name := p.DisplayName
+		if name == "" {
+			name = p.Username
+		}
+		usernames[p.ID] = name
+	}
+
+	// Convert messages to export format
+	for _, msg := range messages {
+		senderName := usernames[msg.SenderID]
+		if senderName == "" {
+			var sender models.User
+			if database.DB.First(&sender, "id = ?", msg.SenderID).Error == nil {
+				senderName = sender.DisplayName
+				if senderName == "" {
+					senderName = sender.Username
+				}
+				usernames[msg.SenderID] = senderName
+			}
+		}
+
+		exportMsg := ExportMessage{
+			ID:            msg.ID,
+			SenderID:      msg.SenderID,
+			SenderName:    senderName,
+			Content:       msg.Content,
+			MediaID:       msg.MediaID,
+			ForwardedFrom: msg.ForwardedFrom,
+			ReplyToID:     msg.ReplyToID,
+			EditedAt:      msg.EditedAt,
+			CreatedAt:     msg.CreatedAt,
+		}
+
+		// Include media info if present
+		if msg.Media != nil {
+			exportMsg.MediaURL = msg.Media.URL
+			exportMsg.MediaType = msg.Media.ContentType
+		}
+
+		export.Messages = append(export.Messages, exportMsg)
+	}
+
+	export.MessageCount = len(export.Messages)
+
+	// Return based on format
+	if format == "txt" {
+		return h.exportAsText(c, export)
+	}
+
+	// Default: JSON
+	return c.JSON(export)
+}
+
+// exportAsText returns the conversation as a plain text file
+func (h *MessagesHandler) exportAsText(c *fiber.Ctx, export ExportConversation) error {
+	var text string
+
+	// Header
+	text += "=== Chat Export ===\n"
+	text += "Exported: " + export.ExportedAt.Format("2006-01-02 15:04:05") + "\n"
+	text += "Exported by: " + export.ExportedBy + "\n"
+
+	if export.Type == "group" {
+		text += "Group: " + export.GroupName + "\n"
+	} else {
+		text += "Conversation with: "
+		for i, p := range export.Participants {
+			if p.Username != export.ExportedBy {
+				if i > 0 {
+					text += ", "
+				}
+				name := p.DisplayName
+				if name == "" {
+					name = p.Username
+				}
+				text += name
+			}
+		}
+		text += "\n"
+	}
+
+	text += "Messages: " + strconv.Itoa(export.MessageCount) + "\n"
+	if export.DateRange.From != nil || export.DateRange.To != nil {
+		text += "Date range: "
+		if export.DateRange.From != nil {
+			text += export.DateRange.From.Format("2006-01-02")
+		} else {
+			text += "start"
+		}
+		text += " to "
+		if export.DateRange.To != nil {
+			text += export.DateRange.To.Format("2006-01-02")
+		} else {
+			text += "now"
+		}
+		text += "\n"
+	}
+	text += "\n=== Messages ===\n\n"
+
+	// Messages
+	for _, msg := range export.Messages {
+		// Timestamp and sender
+		text += "[" + msg.CreatedAt.Format("2006-01-02 15:04:05") + "] "
+		text += msg.SenderName
+
+		if msg.ForwardedFrom != nil {
+			text += " (forwarded from " + *msg.ForwardedFrom + ")"
+		}
+		if msg.EditedAt != nil {
+			text += " (edited)"
+		}
+		text += ":\n"
+
+		// Content
+		if msg.Content != "" {
+			text += msg.Content + "\n"
+		}
+
+		// Media
+		if msg.MediaID != nil {
+			text += "[Media: " + msg.MediaType + "]\n"
+		}
+
+		text += "\n"
+	}
+
+	// Set headers for file download
+	c.Set("Content-Type", "text/plain; charset=utf-8")
+	c.Set("Content-Disposition", "attachment; filename=\"chat-export.txt\"")
+
+	return c.SendString(text)
+}
+
+// GetReactions returns all reactions for a message
+func (h *MessagesHandler) GetReactions(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	messageID := c.Params("id")
+
+	// Find the message
+	var message models.Message
+	if err := database.DB.First(&message, "id = ?", messageID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Message not found",
+		})
+	}
+
+	// Check access
+	if err := h.checkMessageAccess(userID, &message); err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	// Get reactions
+	reactionInfo, err := models.GetMessageReactionInfo(database.DB, messageID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to get reactions",
+		})
+	}
+
+	// Get user details for each reaction
+	type ReactionWithUsers struct {
+		Emoji string                   `json:"emoji"`
+		Count int                      `json:"count"`
+		Users []map[string]interface{} `json:"users"`
+	}
+
+	var result []ReactionWithUsers
+	for _, ri := range reactionInfo {
+		rwu := ReactionWithUsers{
+			Emoji: ri.Emoji,
+			Count: ri.Count,
+			Users: make([]map[string]interface{}, 0),
+		}
+
+		for _, uid := range ri.Users {
+			var user models.User
+			if database.DB.First(&user, "id = ?", uid).Error == nil {
+				userInfo := map[string]interface{}{
+					"id":       user.ID,
+					"username": user.Username,
+				}
+				if user.DisplayName != "" {
+					userInfo["display_name"] = user.DisplayName
+				}
+				userInfo["online"] = h.hub != nil && h.hub.IsOnline(user.ID)
+				rwu.Users = append(rwu.Users, userInfo)
+			}
+		}
+		result = append(result, rwu)
+	}
+
+	return c.JSON(fiber.Map{
+		"message_id": messageID,
+		"reactions":  result,
+	})
+}
+
+type AddReactionRequest struct {
+	Emoji string `json:"emoji"`
+}
+
+// AddReaction adds a reaction to a message
+func (h *MessagesHandler) AddReaction(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	messageID := c.Params("id")
+
+	var req AddReactionRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	if req.Emoji == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Emoji is required",
+		})
+	}
+
+	// Find the message
+	var message models.Message
+	if err := database.DB.First(&message, "id = ?", messageID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Message not found",
+		})
+	}
+
+	// Check access
+	if err := h.checkMessageAccess(userID, &message); err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	// Add reaction
+	reaction, err := models.AddReaction(database.DB, messageID, userID, req.Emoji)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to add reaction",
+		})
+	}
+
+	// Broadcast via WebSocket
+	if h.hub != nil {
+		reactionInfo, _ := models.GetMessageReactionInfo(database.DB, messageID)
+		event := map[string]interface{}{
+			"type":       "reaction",
+			"message_id": messageID,
+			"user_id":    userID,
+			"emoji":      req.Emoji,
+			"action":     "added",
+			"reactions":  reactionInfo,
+		}
+		eventBytes, _ := json.Marshal(event)
+
+		if message.IsGroupMessage() {
+			h.hub.SendToGroup(*message.GroupID, "", eventBytes)
+		} else if message.RecipientID != nil {
+			h.hub.SendToUser(*message.RecipientID, eventBytes)
+			h.hub.SendToUser(message.SenderID, eventBytes)
+		}
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"id":         reaction.ID,
+		"message_id": messageID,
+		"user_id":    userID,
+		"emoji":      req.Emoji,
+		"created_at": reaction.CreatedAt,
+	})
+}
+
+// RemoveReaction removes a user's reaction from a message
+func (h *MessagesHandler) RemoveReaction(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	messageID := c.Params("id")
+
+	// Find the message
+	var message models.Message
+	if err := database.DB.First(&message, "id = ?", messageID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Message not found",
+		})
+	}
+
+	// Check access
+	if err := h.checkMessageAccess(userID, &message); err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	// Remove reaction
+	if err := models.RemoveReaction(database.DB, messageID, userID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to remove reaction",
+		})
+	}
+
+	// Broadcast via WebSocket
+	if h.hub != nil {
+		reactionInfo, _ := models.GetMessageReactionInfo(database.DB, messageID)
+		event := map[string]interface{}{
+			"type":       "reaction",
+			"message_id": messageID,
+			"user_id":    userID,
+			"action":     "removed",
+			"reactions":  reactionInfo,
+		}
+		eventBytes, _ := json.Marshal(event)
+
+		if message.IsGroupMessage() {
+			h.hub.SendToGroup(*message.GroupID, "", eventBytes)
+		} else if message.RecipientID != nil {
+			h.hub.SendToUser(*message.RecipientID, eventBytes)
+			h.hub.SendToUser(message.SenderID, eventBytes)
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"message":    "Reaction removed",
+		"message_id": messageID,
+	})
+}
+
+// checkMessageAccess verifies the user can access the message
+func (h *MessagesHandler) checkMessageAccess(userID string, message *models.Message) error {
+	if message.IsGroupMessage() {
+		var membership models.GroupMember
+		if err := database.DB.Where("group_id = ? AND user_id = ?", *message.GroupID, userID).First(&membership).Error; err != nil {
+			return fiber.NewError(fiber.StatusForbidden, "You are not a member of this group")
+		}
+	} else {
+		if message.SenderID != userID && (message.RecipientID == nil || *message.RecipientID != userID) {
+			return fiber.NewError(fiber.StatusForbidden, "You don't have access to this message")
+		}
+	}
+	return nil
 }
