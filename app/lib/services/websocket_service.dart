@@ -7,13 +7,20 @@ enum ConnectionStatus { disconnected, connecting, connected }
 
 class WebSocketService {
   static const String wsUrl = 'ws://localhost:8080/ws';
+  static const int _maxReconnectAttempts = 10;
+  static const Duration _initialReconnectDelay = Duration(seconds: 1);
+  static const Duration _maxReconnectDelay = Duration(seconds: 30);
 
   WebSocketChannel? _channel;
   ConnectionStatus _status = ConnectionStatus.disconnected;
   Timer? _reconnectTimer;
   Timer? _pingTimer;
+  Timer? _connectionTimeoutTimer;
 
   String? _token;
+  int _reconnectAttempts = 0;
+  Duration _currentReconnectDelay = _initialReconnectDelay;
+  final List<Map<String, dynamic>> _pendingMessages = [];
 
   final _messageController = StreamController<Message>.broadcast();
   final _typingController = StreamController<Map<String, dynamic>>.broadcast();
@@ -50,6 +57,16 @@ class WebSocketService {
       final uri = Uri.parse('$wsUrl?token=$_token');
       _channel = WebSocketChannel.connect(uri);
 
+      // Set connection timeout
+      _connectionTimeoutTimer?.cancel();
+      _connectionTimeoutTimer = Timer(const Duration(seconds: 10), () {
+        if (_status == ConnectionStatus.connecting) {
+          print('Connection timeout');
+          _channel?.sink.close();
+          _handleDisconnect();
+        }
+      });
+
       _channel!.stream.listen(
         _handleMessage,
         onDone: _handleDisconnect,
@@ -59,7 +76,9 @@ class WebSocketService {
         },
       );
 
+      _connectionTimeoutTimer?.cancel();
       _updateStatus(ConnectionStatus.connected);
+      _resetReconnectState();
       _startPingTimer();
 
     } catch (e) {
@@ -107,15 +126,50 @@ class WebSocketService {
   void _handleDisconnect() {
     _updateStatus(ConnectionStatus.disconnected);
     _stopPingTimer();
+    _connectionTimeoutTimer?.cancel();
     _channel = null;
 
-    // Schedule reconnect
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 3), () {
-      if (_token != null) {
+    // Schedule reconnect with exponential backoff
+    if (_token != null && _reconnectAttempts < _maxReconnectAttempts) {
+      _reconnectTimer?.cancel();
+      _reconnectTimer = Timer(_currentReconnectDelay, () {
+        _reconnectAttempts++;
+        // Exponential backoff: 1s, 2s, 4s, 8s, ... up to 30s
+        _currentReconnectDelay = Duration(
+          milliseconds: (_currentReconnectDelay.inMilliseconds * 2)
+              .clamp(0, _maxReconnectDelay.inMilliseconds),
+        );
+        print('Reconnecting (attempt $_reconnectAttempts)...');
         _connect();
-      }
-    });
+      });
+    } else if (_reconnectAttempts >= _maxReconnectAttempts) {
+      print('Max reconnect attempts reached. Call connect() manually to retry.');
+    }
+  }
+
+  /// Reset reconnection state after successful connection
+  void _resetReconnectState() {
+    _reconnectAttempts = 0;
+    _currentReconnectDelay = _initialReconnectDelay;
+    _flushPendingMessages();
+  }
+
+  /// Send any messages that were queued while disconnected
+  void _flushPendingMessages() {
+    if (!isConnected || _pendingMessages.isEmpty) return;
+
+    for (final msg in _pendingMessages) {
+      _channel?.sink.add(jsonEncode(msg));
+    }
+    _pendingMessages.clear();
+  }
+
+  /// Queue a message to be sent when reconnected
+  void _queueMessage(Map<String, dynamic> message) {
+    // Only queue messages, not typing indicators
+    if (message['type'] == 'message') {
+      _pendingMessages.add(message);
+    }
   }
 
   void _updateStatus(ConnectionStatus status) {
@@ -145,11 +199,6 @@ class WebSocketService {
     String? replyToId,     // For replies
     String? forwardedFrom, // Original sender name for forwarded messages
   }) {
-    if (!isConnected) {
-      print('Cannot send message: not connected');
-      return;
-    }
-
     if (to == null && groupId == null) {
       print('Cannot send message: no recipient or group specified');
       return;
@@ -165,7 +214,13 @@ class WebSocketService {
       if (forwardedFrom != null) 'forwarded_from': forwardedFrom,
     };
 
-    _channel?.sink.add(jsonEncode(message));
+    if (isConnected) {
+      _channel?.sink.add(jsonEncode(message));
+    } else {
+      // Queue message to be sent when reconnected
+      _queueMessage(message);
+      print('Message queued (${_pendingMessages.length} pending)');
+    }
   }
 
   void sendTyping({required String to, required bool typing}) {
