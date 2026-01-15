@@ -2,6 +2,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user.dart';
 import '../services/api_service.dart';
 import '../services/websocket_service.dart';
+import '../services/offline_database.dart';
+import '../services/sync_service.dart';
+import '../services/push_service.dart';
 
 final apiServiceProvider = Provider<ApiService>((ref) {
   return ApiService();
@@ -9,6 +12,22 @@ final apiServiceProvider = Provider<ApiService>((ref) {
 
 final webSocketServiceProvider = Provider<WebSocketService>((ref) {
   return WebSocketService();
+});
+
+final offlineDatabaseProvider = Provider<OfflineDatabase>((ref) {
+  return OfflineDatabase();
+});
+
+final syncServiceProvider = Provider<SyncService>((ref) {
+  final db = ref.watch(offlineDatabaseProvider);
+  final api = ref.watch(apiServiceProvider);
+  final ws = ref.watch(webSocketServiceProvider);
+  return SyncService(db: db, api: api, ws: ws);
+});
+
+final pushServiceProvider = Provider<PushService>((ref) {
+  final api = ref.watch(apiServiceProvider);
+  return PushService(api: api);
 });
 
 enum AuthStatus { unknown, authenticated, unauthenticated }
@@ -44,8 +63,17 @@ class AuthState {
 class AuthNotifier extends StateNotifier<AuthState> {
   final ApiService _apiService;
   final WebSocketService _webSocketService;
+  final SyncService _syncService;
+  final PushService _pushService;
+  final OfflineDatabase _offlineDb;
 
-  AuthNotifier(this._apiService, this._webSocketService) : super(AuthState()) {
+  AuthNotifier(
+    this._apiService,
+    this._webSocketService,
+    this._syncService,
+    this._pushService,
+    this._offlineDb,
+  ) : super(AuthState()) {
     _init();
   }
 
@@ -57,8 +85,21 @@ class AuthNotifier extends StateNotifier<AuthState> {
         user: _apiService.currentUser,
       );
       _connectWebSocket();
+      _initializePushNotifications();
+      // Trigger initial sync
+      _syncService.sync();
     } else {
       state = state.copyWith(status: AuthStatus.unauthenticated);
+    }
+  }
+
+  Future<void> _initializePushNotifications() async {
+    try {
+      await _pushService.initialize();
+      await _pushService.requestPermission();
+    } catch (e) {
+      // Push notifications are optional, don't fail auth
+      print('Push notification setup failed: $e');
     }
   }
 
@@ -82,6 +123,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         isLoading: false,
       );
       _connectWebSocket();
+      _initializePushNotifications();
+      _syncService.sync();
     } catch (e) {
       state = state.copyWith(
         error: 'Login failed: ${e.toString()}',
@@ -105,6 +148,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         isLoading: false,
       );
       _connectWebSocket();
+      _initializePushNotifications();
+      _syncService.sync();
     } catch (e) {
       state = state.copyWith(
         error: 'Registration failed: ${e.toString()}',
@@ -115,6 +160,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> logout() async {
     _webSocketService.disconnect();
+    await _pushService.unregisterToken();
+    await _syncService.clearCache();
     await _apiService.logout();
     state = AuthState(status: AuthStatus.unauthenticated);
   }
@@ -123,5 +170,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   final apiService = ref.watch(apiServiceProvider);
   final webSocketService = ref.watch(webSocketServiceProvider);
-  return AuthNotifier(apiService, webSocketService);
+  final syncService = ref.watch(syncServiceProvider);
+  final pushService = ref.watch(pushServiceProvider);
+  final offlineDb = ref.watch(offlineDatabaseProvider);
+  return AuthNotifier(
+    apiService,
+    webSocketService,
+    syncService,
+    pushService,
+    offlineDb,
+  );
 });
