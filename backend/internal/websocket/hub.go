@@ -78,6 +78,13 @@ func (h *Hub) GetClient(userID string) *Client {
 	return h.clients[userID]
 }
 
+// GetActiveConnectionCount returns the number of currently connected clients
+func (h *Hub) GetActiveConnectionCount() int64 {
+	h.mutex.RLock()
+	defer h.mutex.RUnlock()
+	return int64(len(h.clients))
+}
+
 func (h *Hub) SendToUser(userID string, message []byte) bool {
 	h.mutex.RLock()
 	client, ok := h.clients[userID]

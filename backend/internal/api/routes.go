@@ -10,10 +10,13 @@ import (
 )
 
 func SetupRoutes(app *fiber.App, hub *ws.Hub) {
-	// Health check
-	app.Get("/health", func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{"status": "ok"})
-	})
+	// Health and metrics endpoints (public)
+	healthHandler := handlers.NewHealthHandler(hub)
+	app.Get("/health", healthHandler.Health)
+	app.Get("/healthz", healthHandler.Liveness)      // Kubernetes liveness probe
+	app.Get("/readyz", healthHandler.Readiness)      // Kubernetes readiness probe
+	app.Get("/metrics", healthHandler.Metrics)       // JSON metrics
+	app.Get("/metrics/prometheus", healthHandler.PrometheusMetrics) // Prometheus format
 
 	// API routes
 	api := app.Group("/api")
