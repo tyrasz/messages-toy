@@ -11,8 +11,19 @@ services:
       - PORT=8080
       - DATABASE_PATH=/app/data/messenger.db
       - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      - USE_MOCK_MODERATION=${USE_MOCK_MODERATION:-true}
+      # Push notifications (optional - configure one or more)
       - FIREBASE_CREDENTIALS_PATH=/app/config/firebase-credentials.json
       - GOOGLE_APPLICATION_CREDENTIALS=/app/config/gcp-credentials.json
+      # APNs direct (optional)
+      - APNS_BUNDLE_ID=${APNS_BUNDLE_ID:-}
+      - APNS_KEY_PATH=${APNS_KEY_PATH:-}
+      - APNS_KEY_ID=${APNS_KEY_ID:-}
+      - APNS_TEAM_ID=${APNS_TEAM_ID:-}
+      # Web Push (optional)
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
+      - VAPID_SUBSCRIBER=${VAPID_SUBSCRIBER:-}
     volumes:
       - messenger-data:/app/data
       - messenger-uploads:/app/uploads
