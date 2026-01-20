@@ -1,1 +1,39 @@
+# Binary
 server
+messenger
+bin/
+
+# Air hot reload
+tmp/
+
+# Database
+*.db
+*.sqlite
+
+# Test coverage
+coverage.out
+coverage.html
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config (may contain secrets)
+config/
+
+# Uploads (mounted as volumes)
+uploads/
