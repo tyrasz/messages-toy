@@ -32,6 +32,7 @@ type Message struct {
 	EditedAt      *time.Time    `json:"edited_at,omitempty"`                 // When message was edited
 	DeletedAt     *time.Time    `json:"deleted_at,omitempty"`                // Soft delete for "delete for everyone"
 	ExpiresAt     *time.Time    `gorm:"index" json:"expires_at,omitempty"`   // For disappearing messages
+	IsEncrypted   bool          `gorm:"default:false" json:"is_encrypted"`   // E2EE encrypted message
 	CreatedAt     time.Time     `json:"created_at"`
 	UpdatedAt     time.Time     `json:"updated_at"`
 

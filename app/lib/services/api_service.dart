@@ -11,6 +11,7 @@ import '../models/link_preview.dart';
 import '../models/starred_message.dart';
 import '../models/poll.dart';
 import '../models/pinned_message.dart';
+import 'crypto_service.dart';
 
 class ApiService {
   static const String baseUrl = 'http://localhost:8080/api';
@@ -508,5 +509,123 @@ class ApiService {
     if (groupId != null) params['group_id'] = groupId;
     final response = await _dio.get('/receipts/unread', queryParameters: params);
     return response.data['unread_count'] as int;
+  }
+
+  // E2EE Key Management endpoints
+
+  /// Register encryption keys for this device
+  Future<Map<String, dynamic>> registerKeys(KeyRegistrationData keyData) async {
+    final response = await _dio.post('/keys/register', data: keyData.toJson());
+    return response.data as Map<String, dynamic>;
+  }
+
+  /// Upload additional one-time prekeys
+  Future<Map<String, dynamic>> uploadPreKeys(
+    String deviceId,
+    List<PreKeyData> prekeys,
+  ) async {
+    final response = await _dio.post('/keys/prekeys/$deviceId', data: {
+      'prekeys': prekeys.map((p) => p.toJson()).toList(),
+    });
+    return response.data as Map<String, dynamic>;
+  }
+
+  /// Get prekey count for a device
+  Future<Map<String, dynamic>> getPreKeyCount(String deviceId) async {
+    final response = await _dio.get('/keys/prekeys/$deviceId/count');
+    return response.data as Map<String, dynamic>;
+  }
+
+  /// Get prekey bundle for a user (for establishing session)
+  Future<PreKeyBundle> getPreKeyBundle(String userId, {String? deviceId}) async {
+    final params = <String, dynamic>{};
+    if (deviceId != null) params['device_id'] = deviceId;
+    final response = await _dio.get('/keys/bundle/$userId', queryParameters: params);
+    return PreKeyBundle.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Get all prekey bundles for a user (all devices)
+  Future<List<Map<String, dynamic>>> getAllPreKeyBundles(String userId) async {
+    final response = await _dio.get('/keys/bundle/$userId');
+    final bundles = response.data['bundles'] as List?;
+    return bundles?.cast<Map<String, dynamic>>() ?? [];
+  }
+
+  /// Get my registered devices
+  Future<List<Map<String, dynamic>>> getMyDevices() async {
+    final response = await _dio.get('/keys/devices');
+    final devices = response.data['devices'] as List?;
+    return devices?.cast<Map<String, dynamic>>() ?? [];
+  }
+
+  /// Get a user's registered devices
+  Future<List<Map<String, dynamic>>> getUserDevices(String userId) async {
+    final response = await _dio.get('/keys/devices/$userId');
+    final devices = response.data['devices'] as List?;
+    return devices?.cast<Map<String, dynamic>>() ?? [];
+  }
+
+  /// Remove a device
+  Future<void> removeDevice(String deviceId) async {
+    await _dio.delete('/keys/devices/$deviceId');
+  }
+
+  /// Verify a user's identity key
+  Future<bool> verifyIdentityKey(
+    String userId,
+    String identityKey, {
+    String? deviceId,
+  }) async {
+    final params = <String, dynamic>{};
+    if (deviceId != null) params['device_id'] = deviceId;
+    final response = await _dio.post(
+      '/keys/verify/$userId',
+      data: {'identity_key': identityKey},
+      queryParameters: params,
+    );
+    return response.data['verified'] as bool;
+  }
+
+  /// Store a sender key for group encryption
+  Future<void> storeSenderKey(
+    String groupId,
+    String deviceId,
+    int keyId,
+    String chainKey,
+    String signingKey,
+  ) async {
+    await _dio.post(
+      '/keys/sender-keys/$groupId',
+      data: {
+        'key_id': keyId,
+        'chain_key': chainKey,
+        'signing_key': signingKey,
+      },
+      options: Options(headers: {'X-Device-ID': deviceId}),
+    );
+  }
+
+  /// Get sender keys for a group
+  Future<List<Map<String, dynamic>>> getGroupSenderKeys(String groupId) async {
+    final response = await _dio.get('/keys/sender-keys/$groupId');
+    final keys = response.data['sender_keys'] as List?;
+    return keys?.cast<Map<String, dynamic>>() ?? [];
+  }
+
+  /// Get a specific sender key
+  Future<Map<String, dynamic>?> getSenderKey(
+    String groupId,
+    String userId,
+    String deviceId,
+  ) async {
+    try {
+      final response = await _dio.get(
+        '/keys/sender-keys/$groupId/$userId',
+        queryParameters: {'device_id': deviceId},
+      );
+      return response.data as Map<String, dynamic>;
+    } catch (e) {
+      return null;
+    }
   }
 }

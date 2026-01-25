@@ -24,6 +24,11 @@ dependencies:
   shared_preferences: ^2.2.2
   flutter_secure_storage: ^9.0.0
 
+  # Cryptography (E2EE)
+  cryptography: ^2.7.0
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
   # Offline Database (SQLite + IndexedDB)
   drift: ^2.14.1
   sqlite3_flutter_libs: ^0.5.18

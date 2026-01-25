@@ -187,6 +187,21 @@ func SetupRoutes(app *fiber.App, hub *ws.Hub) {
 	broadcast.Post("/:id/recipients", broadcastHandler.AddRecipient)
 	broadcast.Delete("/:id/recipients/:recipientId", broadcastHandler.RemoveRecipient)
 
+	// E2EE Keys
+	keysHandler := handlers.NewKeysHandler()
+	keys := protected.Group("/keys")
+	keys.Post("/register", keysHandler.RegisterKeys)
+	keys.Post("/prekeys/:deviceId", keysHandler.UploadPreKeys)
+	keys.Get("/prekeys/:deviceId/count", keysHandler.GetPreKeyCount)
+	keys.Get("/bundle/:userId", keysHandler.GetPreKeyBundle)
+	keys.Get("/devices", keysHandler.GetMyDevices)
+	keys.Get("/devices/:userId", keysHandler.GetUserDevices)
+	keys.Delete("/devices/:deviceId", keysHandler.RemoveDevice)
+	keys.Post("/verify/:userId", keysHandler.VerifyIdentityKey)
+	keys.Post("/sender-keys/:groupId", keysHandler.StoreSenderKey)
+	keys.Get("/sender-keys/:groupId", keysHandler.GetGroupSenderKeys)
+	keys.Get("/sender-keys/:groupId/:userId", keysHandler.GetSenderKey)
+
 	// WebSocket endpoint
 	app.Use("/ws", func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {

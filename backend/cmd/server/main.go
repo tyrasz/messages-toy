@@ -47,6 +47,12 @@ func main() {
 		&models.ChatTheme{},
 		&models.Story{},
 		&models.StoryView{},
+		// E2EE models
+		&models.IdentityKey{},
+		&models.PreKey{},
+		&models.SignedPreKey{},
+		&models.EncryptionDevice{},
+		&models.SenderKey{},
 	)
 
 	// Create WebSocket hub

@@ -301,3 +301,49 @@ type ReactionInfo struct {
 	Count int      `json:"count"`
 	Users []string `json:"users"`
 }
+
+// E2EE Message types
+
+// EncryptedChatMessage is sent by clients for end-to-end encrypted messages
+// The server routes these without decrypting
+type EncryptedChatMessage struct {
+	Type              string                    `json:"type"`
+	ID                string                    `json:"id,omitempty"`
+	To                string                    `json:"to,omitempty"`       // For DMs: recipient user ID
+	GroupID           string                    `json:"group_id,omitempty"` // For groups: group ID
+	From              string                    `json:"from,omitempty"`     // Sender ID
+	SenderDeviceID    string                    `json:"sender_device_id"`
+	EncryptedPayloads []EncryptedPayload        `json:"encrypted_payloads"` // One per recipient device
+	CreatedAt         string                    `json:"created_at,omitempty"`
+}
+
+// EncryptedPayload contains encrypted content for a specific device
+type EncryptedPayload struct {
+	RecipientDeviceID string `json:"recipient_device_id"`
+	CipherText        string `json:"cipher_text"`   // Base64 encoded
+	MessageType       int    `json:"message_type"`  // 1=PreKeyMessage, 2=Message
+}
+
+// SenderKeyDistributionMessage is used to distribute sender keys for group E2EE
+type SenderKeyDistributionMessage struct {
+	Type           string `json:"type"`
+	GroupID        string `json:"group_id"`
+	SenderDeviceID string `json:"sender_device_id"`
+	Distribution   string `json:"distribution"` // Base64 encoded sender key distribution
+}
+
+// PreKeyCountWarning notifies client when prekey count is low
+type PreKeyCountWarning struct {
+	Type         string `json:"type"`
+	DeviceID     string `json:"device_id"`
+	PrekeyCount  int64  `json:"prekey_count"`
+	MinThreshold int    `json:"min_threshold"`
+}
+
+// IdentityKeyChanged warns when a contact's identity key has changed
+type IdentityKeyChanged struct {
+	Type      string `json:"type"`
+	UserID    string `json:"user_id"`
+	DeviceID  string `json:"device_id"`
+	NewKey    string `json:"new_key"` // Base64 encoded public key
+}

@@ -101,6 +101,10 @@ func (c *Client) handleMessage(data []byte) {
 	switch base.Type {
 	case "message":
 		c.handleChatMessage(data)
+	case "encrypted_message":
+		c.handleEncryptedMessage(data)
+	case "sender_key_distribution":
+		c.handleSenderKeyDistribution(data)
 	case "typing":
 		c.handleTypingMessage(data)
 	case "ack":
@@ -705,6 +709,212 @@ func (c *Client) sendError(message string) {
 	}
 	errBytes, _ := json.Marshal(errMsg)
 	c.Send <- errBytes
+}
+
+// handleEncryptedMessage handles E2EE encrypted messages
+// The server routes encrypted payloads without decrypting
+func (c *Client) handleEncryptedMessage(data []byte) {
+	var msg EncryptedChatMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		c.sendError("Invalid encrypted message format")
+		return
+	}
+
+	// Validate sender device ID
+	if msg.SenderDeviceID == "" {
+		c.sendError("Sender device ID is required")
+		return
+	}
+
+	// Must have either recipient (DM) or group_id (group message)
+	if msg.To == "" && msg.GroupID == "" {
+		c.sendError("Recipient or group_id is required")
+		return
+	}
+
+	if len(msg.EncryptedPayloads) == 0 {
+		c.sendError("Encrypted payloads are required")
+		return
+	}
+
+	// Handle group message
+	if msg.GroupID != "" {
+		c.handleEncryptedGroupMessage(msg)
+		return
+	}
+
+	// Handle DM
+	c.handleEncryptedDirectMessage(msg)
+}
+
+func (c *Client) handleEncryptedDirectMessage(msg EncryptedChatMessage) {
+	// Check if either user has blocked the other
+	if models.IsEitherBlocked(database.DB, c.UserID, msg.To) {
+		c.sendError("Cannot send message to this user")
+		return
+	}
+
+	// Save encrypted message metadata to database
+	// Note: Content is encrypted, server cannot read it
+	message := models.Message{
+		SenderID:    c.UserID,
+		RecipientID: &msg.To,
+		Content:     "[Encrypted message]", // Placeholder - actual content is E2EE
+		IsEncrypted: true,
+		Status:      models.MessageStatusSent,
+	}
+
+	if err := database.DB.Create(&message).Error; err != nil {
+		c.sendError("Failed to save message")
+		return
+	}
+
+	// Prepare outgoing encrypted message
+	outMsg := EncryptedChatMessage{
+		Type:              "encrypted_message",
+		ID:                message.ID,
+		From:              c.UserID,
+		To:                msg.To,
+		SenderDeviceID:    msg.SenderDeviceID,
+		EncryptedPayloads: msg.EncryptedPayloads,
+		CreatedAt:         message.CreatedAt.Format(time.RFC3339),
+	}
+
+	msgBytes, _ := json.Marshal(outMsg)
+
+	// Send to recipient
+	if c.Hub.SendToUser(msg.To, msgBytes) {
+		database.DB.Model(&message).Update("status", models.MessageStatusDelivered)
+
+		ack := AckMessage{
+			Type:      "ack",
+			MessageID: message.ID,
+			Status:    "delivered",
+		}
+		ackBytes, _ := json.Marshal(ack)
+		c.Send <- ackBytes
+	} else {
+		ack := AckMessage{
+			Type:      "ack",
+			MessageID: message.ID,
+			Status:    "sent",
+		}
+		ackBytes, _ := json.Marshal(ack)
+		c.Send <- ackBytes
+
+		// Send push notification
+		go services.PushMessageToOfflineUser(
+			database.DB,
+			msg.To,
+			c.UserID,
+			"Encrypted message", // Can't show content
+			false,
+			msg.To,
+		)
+	}
+}
+
+func (c *Client) handleEncryptedGroupMessage(msg EncryptedChatMessage) {
+	// Check if user is a member of the group
+	var membership models.GroupMember
+	if err := database.DB.Where("group_id = ? AND user_id = ?", msg.GroupID, c.UserID).First(&membership).Error; err != nil {
+		c.sendError("You are not a member of this group")
+		return
+	}
+
+	// Save encrypted message metadata
+	message := models.Message{
+		SenderID:    c.UserID,
+		GroupID:     &msg.GroupID,
+		Content:     "[Encrypted message]", // Placeholder
+		IsEncrypted: true,
+		Status:      models.MessageStatusSent,
+	}
+
+	if err := database.DB.Create(&message).Error; err != nil {
+		c.sendError("Failed to save message")
+		return
+	}
+
+	// Prepare outgoing encrypted message
+	outMsg := EncryptedChatMessage{
+		Type:              "encrypted_message",
+		ID:                message.ID,
+		From:              c.UserID,
+		GroupID:           msg.GroupID,
+		SenderDeviceID:    msg.SenderDeviceID,
+		EncryptedPayloads: msg.EncryptedPayloads,
+		CreatedAt:         message.CreatedAt.Format(time.RFC3339),
+	}
+
+	msgBytes, _ := json.Marshal(outMsg)
+
+	// Broadcast to all group members (except sender)
+	sentCount := c.Hub.SendToGroup(msg.GroupID, c.UserID, msgBytes)
+
+	// Send ack to sender
+	status := "sent"
+	if sentCount > 0 {
+		status = "delivered"
+		database.DB.Model(&message).Update("status", models.MessageStatusDelivered)
+	}
+
+	ack := AckMessage{
+		Type:      "ack",
+		MessageID: message.ID,
+		Status:    status,
+	}
+	ackBytes, _ := json.Marshal(ack)
+	c.Send <- ackBytes
+
+	// Push notifications to offline members
+	offlineMembers := c.Hub.GetOfflineGroupMemberIDs(msg.GroupID, c.UserID)
+	if len(offlineMembers) > 0 {
+		go func() {
+			for _, memberID := range offlineMembers {
+				services.PushMessageToOfflineUser(
+					database.DB,
+					memberID,
+					c.UserID,
+					"Encrypted message",
+					true,
+					msg.GroupID,
+				)
+			}
+		}()
+	}
+}
+
+// handleSenderKeyDistribution handles sender key distribution for group E2EE
+func (c *Client) handleSenderKeyDistribution(data []byte) {
+	var msg SenderKeyDistributionMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		c.sendError("Invalid sender key distribution format")
+		return
+	}
+
+	if msg.GroupID == "" || msg.SenderDeviceID == "" || msg.Distribution == "" {
+		c.sendError("Group ID, device ID, and distribution are required")
+		return
+	}
+
+	// Check if user is a member of the group
+	var membership models.GroupMember
+	if err := database.DB.Where("group_id = ? AND user_id = ?", msg.GroupID, c.UserID).First(&membership).Error; err != nil {
+		c.sendError("You are not a member of this group")
+		return
+	}
+
+	// Forward distribution to all group members
+	outMsg := SenderKeyDistributionMessage{
+		Type:           "sender_key_distribution",
+		GroupID:        msg.GroupID,
+		SenderDeviceID: msg.SenderDeviceID,
+		Distribution:   msg.Distribution,
+	}
+
+	msgBytes, _ := json.Marshal(outMsg)
+	c.Hub.SendToGroup(msg.GroupID, c.UserID, msgBytes)
 }
 
 // handleBotMessage handles messages sent to the AI bot
